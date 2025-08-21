@@ -3,8 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import io from "socket.io-client";
 import Peer from "simple-peer";
-const backendUrl = process.env.REACT_APP_BACKEND_URL;
-
+const backendUrl = process.env.REACT_APP_VIDEOBACKEND_URL
 
 const socket = io(`${backendUrl}/user`);
 console.log(io(`${backendUrl}/user`));

@@ -6,7 +6,7 @@ import Peer from "simple-peer";
 const backendUrl = process.env.REACT_APP_VIDEOBACKEND_URL
 
 const socket = io(`${backendUrl}/user`);
-console.log(io(`${backendUrl}/user`));
+console.log(socket);
 
 
 export default function Room() {

@@ -1,24 +1,29 @@
-import logo from './logo.svg';
+import { Navigate, Route, Routes } from 'react-router-dom';
+import Login from './components/Login';
 import './App.css';
+import Signup from './components/Signup';
+import { ToastContainer } from 'react-toastify';
+import Dashboard from './components/Dashboard';
+import Meetingroom from './components/Meetingroom';
+import process from "process";
+window.process = process;
+
+
 
 function App() {
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
-    </div>
+   <div>
+    <Routes>
+      <Route path='/' element={<Navigate to="/Signup" />}></Route>
+      <Route path='/Signup' element={<Signup></Signup>}></Route>
+      <Route path='/Login' element={<Login></Login>}></Route>
+      <Route path='/Dashboard' element={<Dashboard></Dashboard>}></Route>
+      <Route path="/Meetingroom/:roomId" element={<Meetingroom/>} />
+    </Routes>
+     <ToastContainer></ToastContainer>
+
+   </div>
+    
   );
 }
 

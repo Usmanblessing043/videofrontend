@@ -36,3 +36,29 @@
     transform: rotate(360deg);
   }
 }
+.video-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+.my-video video {
+  width: 300px;
+  border: 2px solid #4cafef;
+  border-radius: 10px;
+}
+
+.other-videos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.other-videos video {
+  width: 300px;
+  border: 2px solid #ccc;
+  border-radius: 10px;
+}
+

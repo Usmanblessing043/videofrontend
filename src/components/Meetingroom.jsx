@@ -107,20 +107,25 @@ export default function Room() {
 
   //   return peer;
   // }
-  const iceServers = [
-  { urls: "stun:stun.l.google.com:19302" }, // free Google STUN
-  // Optional: add a TURN server if you have one (recommended for production)
-  // { urls: "turn:your.turn.server:3478", username: "user", credential: "pass" }
-]
-  function createPeer(userToSignal, callerId, stream) {
+const iceServers = [
+  { urls: "stun:stun.l.google.com:19302" },
+  {
+    urls: "turn:relay1.expressturn.com:3478",
+    username: "efwefwefwe",
+    credential: "sdfdsfsdfsdf"
+  }
+];
+
+function createPeer(userToSignal, callerId, stream) {
   const peer = new Peer({
     initiator: true,
     trickle: false,
     stream,
-    config: { iceServers }
+    config: { iceServers },
   });
 
   peer.on("signal", (signal) => {
+    console.log("👉 sending signal to", userToSignal);
     socket.emit("sending-signal", { userToSignal, callerId, signal });
   });
 
@@ -129,18 +134,24 @@ export default function Room() {
   return peer;
 }
 
-  // ✅ Add peer (not initiator)
-  function addPeer(callerId, stream) {
-    const peer = new Peer({ initiator: false, trickle: false, stream });
+function addPeer(callerId, stream) {
+  const peer = new Peer({
+    initiator: false,
+    trickle: false,
+    stream,
+    config: { iceServers },
+  });
 
-    peer.on("signal", (signal) => {
-      socket.emit("returning-signal", { signal, callerId });
-    });
+  peer.on("signal", (signal) => {
+    console.log("👉 returning signal to", callerId);
+    socket.emit("returning-signal", { signal, callerId });
+  });
 
-    peer.on("error", (err) => console.error("Peer error:", err));
+  peer.on("error", (err) => console.error("Peer error:", err));
 
-    return peer;
-  }
+  return peer;
+}
+
 
   const toggleMute = () => {
     const audioTrack = streamRef.current?.getAudioTracks()[0];

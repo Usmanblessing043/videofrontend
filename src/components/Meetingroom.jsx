@@ -3,17 +3,16 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import io from "socket.io-client";
 import Peer from "simple-peer";
-const backendUrl = process.env.REACT_APP_VIDEOBACKEND_URL
 
+const backendUrl = process.env.REACT_APP_VIDEOBACKEND_URL;
 const socket = io(`${backendUrl}/user`);
-console.log(socket);
-
 
 export default function Room() {
   const { roomId } = useParams();
   const navigate = useNavigate();
+
   const [peers, setPeers] = useState([]);
-  const peersRef = useRef([]);
+  const peersRef = useRef({}); // ✅ now using a map instead of array
   const myVideo = useRef();
   const streamRef = useRef(null);
 
@@ -39,9 +38,9 @@ export default function Room() {
       socket.on("all-users", users => {
         const peersArr = [];
         users.forEach(userId => {
-          if (!peersRef.current.find(p => p.peerId === userId)) {
+          if (!peersRef.current[userId]) {
             const peer = createPeer(userId, socket.id, stream);
-            peersRef.current.push({ peerId: userId, peer });
+            peersRef.current[userId] = peer;
             peersArr.push({ peerId: userId, peer });
           }
         });
@@ -49,30 +48,32 @@ export default function Room() {
       });
 
       socket.on("user-joined", payload => {
-        if (!peersRef.current.find(p => p.peerId === payload.callerId)) {
+        if (!peersRef.current[payload.callerId]) {
           const peer = addPeer(payload.signal, payload.callerId, stream);
-          peersRef.current.push({ peerId: payload.callerId, peer });
+          peersRef.current[payload.callerId] = peer;
           setPeers(users => [...users, { peerId: payload.callerId, peer }]);
         }
       });
 
       socket.on("signal", ({ signal, callerId }) => {
-        const peerObj = peersRef.current.find(p => p.peerId === callerId);
-        if (peerObj) {
+        const peer = peersRef.current[callerId];
+        if (peer) {
           try {
-            peerObj.peer.signal(signal);
+            peer.signal(signal);
           } catch (err) {
             console.warn("Signal error:", err.message);
           }
+        } else {
+          console.warn("No peer found for callerId:", callerId);
         }
       });
 
       socket.on("user-left", id => {
-        const peerObj = peersRef.current.find(p => p.peerId === id);
-        if (peerObj) {
-          peerObj.peer.destroy();
+        const peer = peersRef.current[id];
+        if (peer) {
+          peer.destroy();
+          delete peersRef.current[id];
         }
-        peersRef.current = peersRef.current.filter(p => p.peerId !== id);
         setPeers(users => users.filter(p => p.peerId !== id));
       });
 
@@ -115,14 +116,11 @@ export default function Room() {
 
     peer.on("error", err => console.error("Peer error:", err));
 
-    // Delay to avoid SDP state error
-    setTimeout(() => {
-      try {
-        peer.signal(incomingSignal);
-      } catch (err) {
-        console.warn("AddPeer signal error:", err.message);
-      }
-    }, 100);
+    try {
+      peer.signal(incomingSignal); // ✅ immediate, no setTimeout
+    } catch (err) {
+      console.warn("AddPeer signal error:", err.message);
+    }
 
     return peer;
   }
@@ -146,7 +144,7 @@ export default function Room() {
   const startScreenShare = async () => {
     const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
     const screenTrack = screenStream.getVideoTracks()[0];
-    peersRef.current.forEach(({ peer }) => {
+    Object.values(peersRef.current).forEach(peer => {
       const sender = peer._pc.getSenders().find(s => s.track?.kind === "video");
       if (sender) sender.replaceTrack(screenTrack);
     });
@@ -154,7 +152,7 @@ export default function Room() {
 
     screenTrack.onended = () => {
       const videoTrack = streamRef.current.getVideoTracks()[0];
-      peersRef.current.forEach(({ peer }) => {
+      Object.values(peersRef.current).forEach(peer => {
         const sender = peer._pc.getSenders().find(s => s.track?.kind === "video");
         if (sender) sender.replaceTrack(videoTrack);
       });
@@ -180,8 +178,8 @@ export default function Room() {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
     }
-    peersRef.current.forEach(({ peer }) => !peer.destroyed && peer.destroy());
-    peersRef.current = [];
+    Object.values(peersRef.current).forEach(peer => !peer.destroyed && peer.destroy());
+    peersRef.current = {};
     setPeers([]);
   };
 

@@ -51,6 +51,7 @@ label{
 }
 button{
     height: 30px;
+    width: 120px;
     font-weight: 500;
     border-radius: 5px;
     border: none;

@@ -107,14 +107,14 @@ export default function Room() {
 
   //   return peer;
   // }
-const iceServers = [
-  { urls: "stun:stun.l.google.com:19302" },  // Free Google STUN
-  {
-    urls: "turn:global.xirsys.net:3478",
-    username: "webrtc",
-    credential: "webrtc",
-  }
-];
+// const iceServers = [
+//   { urls: "stun:stun.l.google.com:19302" },  // Free Google STUN
+//   {
+//     urls: "turn:global.xirsys.net:3478",
+//     username: "webrtc",
+//     credential: "webrtc",
+//   }
+// ];
 
 function createPeer(userToSignal, callerId, stream) {
   const peer = new Peer({

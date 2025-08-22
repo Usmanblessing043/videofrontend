@@ -34,7 +34,6 @@ export default function Room() {
 
       socket.on("host", () => setIsHost(true));
 
-      // ✅ Existing users when I join
       socket.on("all-users", (users) => {
         const peersArr = [];
         users.forEach((userId) => {
@@ -47,22 +46,16 @@ export default function Room() {
         setPeers((prev) => [...prev, ...peersArr]);
       });
 
-      // ✅ A new user joined after me
-      socket.on("user-joined", ({ newUserId }) => {
-        if (!peersRef.current[newUserId]) {
-          const peer = addPeer(newUserId, stream);
-          peersRef.current[newUserId] = peer;
-          setPeers((users) => [...users, { peerId: newUserId, peer }]);
+      socket.on("receiving-signal", ({ signal, callerId }) => {
+        if (!peersRef.current[callerId]) {
+          const peer = addPeer(signal, callerId, stream);
+          peersRef.current[callerId] = peer;
+          setPeers((prev) => [...prev, { peerId: callerId, peer }]);
+        } else {
+          peersRef.current[callerId].signal(signal);
         }
       });
 
-      // ✅ Receive signal from caller
-      socket.on("receiving-signal", ({ signal, callerId }) => {
-        const peer = peersRef.current[callerId];
-        if (peer) peer.signal(signal);
-      });
-
-      // ✅ Receive returned signal from callee
       socket.on("receiving-returned-signal", ({ signal, id }) => {
         const peer = peersRef.current[id];
         if (peer) peer.signal(signal);
@@ -95,81 +88,53 @@ export default function Room() {
     };
   }, [roomId, navigate]);
 
-  // ✅ Create peer (initiator)
-  // function createPeer(userToSignal, callerId, stream) {
-  //   const peer = new Peer({ initiator: true, trickle: false, stream });
+  // ✅ TURN/STUN configuration
+  const iceConfig = {
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" }, // Free STUN
+      {
+        urls: "turn:relay1.expressturn.com:3478",
+        username: "efG3knQJwOqN1HpXj1",
+        credential: "8cG2RzTgN5kGv9P4",
+      },
+    ],
+  };
 
-  //   peer.on("signal", (signal) => {
-  //     socket.emit("sending-signal", { userToSignal, callerId, signal });
-  //   });
+  function createPeer(userToSignal, callerId, stream) {
+    const peer = new Peer({
+      initiator: true,
+      trickle: false,
+      stream,
+      config: iceConfig,
+    });
 
-  //   peer.on("error", (err) => console.error("Peer error:", err));
+    peer.on("signal", (signal) => {
+      socket.emit("send-signal", { userToSignal, callerId, signal });
+    });
 
-  //   return peer;
-  // }
-// const iceServers = [
-//   { urls: "stun:stun.l.google.com:19302" },  // Free Google STUN
-//   {
-//     urls: "turn:global.xirsys.net:3478",
-//     username: "webrtc",
-//     credential: "webrtc",
-//   }
-// ];
+    peer.on("error", (err) => console.error("Peer error (initiator):", err));
 
-function createPeer(userToSignal, callerId, stream) {
-  const peer = new Peer({
-    initiator: true,
-    trickle: true,
-    stream,
-    config: {
-      iceServers: [
-        { urls: "stun:stun.l.google.com:19302" },   // Free Google STUN
-        {
-          urls: "turn:global.xirsys.net:3478",      // Free TURN for testing
-          username: "webrtc",
-          credential: "webrtc",
-        },
-      ],
-    },
-  });
+    return peer;
+  }
 
-  peer.on("signal", (signal) => {
-    socket.emit("send-signal", { userToSignal, callerId, signal });
-  });
+  function addPeer(incomingSignal, callerId, stream) {
+    const peer = new Peer({
+      initiator: false,
+      trickle: false,
+      stream,
+      config: iceConfig,
+    });
 
-  return peer;
-}
+    peer.on("signal", (signal) => {
+      socket.emit("return-signal", { callerId, signal });
+    });
 
-function addPeer(incomingSignal, callerId, stream) {
-  const peer = new Peer({
-    initiator: false,
-    trickle: true,
-    stream,
-    config: {
-      iceServers: [
-        { urls: "stun:stun.l.google.com:19302" },
-        {
-          urls: "turn:global.xirsys.net:3478",
-          username: "webrtc",
-          credential: "webrtc",
-        },
-      ],
-    },
-  });
+    peer.on("error", (err) => console.error("Peer error (answerer):", err));
 
-  peer.on("signal", (signal) => {
-    socket.emit("return-signal", { callerId, signal });
-  });
+    peer.signal(incomingSignal);
 
-  peer.signal(incomingSignal);
-  return peer;
-}
-
-
-
-
-
-
+    return peer;
+  }
 
   const toggleMute = () => {
     const audioTrack = streamRef.current?.getAudioTracks()[0];
@@ -283,7 +248,9 @@ function addPeer(incomingSignal, callerId, stream) {
 function Video({ peer }) {
   const ref = useRef();
   useEffect(() => {
-    peer.on("stream", (stream) => (ref.current.srcObject = stream));
+    peer.on("stream", (stream) => {
+      ref.current.srcObject = stream;
+    });
   }, [peer]);
   return <video ref={ref} autoPlay playsInline style={{ width: "300px" }} />;
 }

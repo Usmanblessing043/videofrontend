@@ -96,17 +96,38 @@ export default function Room() {
   }, [roomId, navigate]);
 
   // ✅ Create peer (initiator)
+  // function createPeer(userToSignal, callerId, stream) {
+  //   const peer = new Peer({ initiator: true, trickle: false, stream });
+
+  //   peer.on("signal", (signal) => {
+  //     socket.emit("sending-signal", { userToSignal, callerId, signal });
+  //   });
+
+  //   peer.on("error", (err) => console.error("Peer error:", err));
+
+  //   return peer;
+  // }
+  const iceServers = [
+  { urls: "stun:stun.l.google.com:19302" }, // free Google STUN
+  // Optional: add a TURN server if you have one (recommended for production)
+  // { urls: "turn:your.turn.server:3478", username: "user", credential: "pass" }
+]
   function createPeer(userToSignal, callerId, stream) {
-    const peer = new Peer({ initiator: true, trickle: false, stream });
+  const peer = new Peer({
+    initiator: true,
+    trickle: false,
+    stream,
+    config: { iceServers }
+  });
 
-    peer.on("signal", (signal) => {
-      socket.emit("sending-signal", { userToSignal, callerId, signal });
-    });
+  peer.on("signal", (signal) => {
+    socket.emit("sending-signal", { userToSignal, callerId, signal });
+  });
 
-    peer.on("error", (err) => console.error("Peer error:", err));
+  peer.on("error", (err) => console.error("Peer error:", err));
 
-    return peer;
-  }
+  return peer;
+}
 
   // ✅ Add peer (not initiator)
   function addPeer(callerId, stream) {

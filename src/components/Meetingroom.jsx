@@ -107,67 +107,67 @@ export default function Room() {
 
   //   return peer;
   // }
-  const iceServers = [
-    { urls: "stun:stun.l.google.com:19302" },
-    {
-      urls: "turn:global.relay.metered.ca:80",
-      username: "openai_demo",
-      credential: "openai_demo"
-    },
-    {
-      urls: "turn:global.relay.metered.ca:443",
-      username: "openai_demo",
-      credential: "openai_demo"
-    },
-    {
-      urls: "turn:global.relay.metered.ca:443?transport=tcp",
-      username: "openai_demo",
-      credential: "openai_demo"
-    }
-  ];
-
+const iceServers = [
+  { urls: "stun:stun.l.google.com:19302" },  // Free Google STUN
+  {
+    urls: "turn:global.xirsys.net:3478",
+    username: "webrtc",
+    credential: "webrtc",
+  }
+];
 
 function createPeer(userToSignal, callerId, stream) {
   const peer = new Peer({
     initiator: true,
-    trickle: false,
+    trickle: true,
     stream,
-    config: { iceServers },
+    config: {
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },   // Free Google STUN
+        {
+          urls: "turn:global.xirsys.net:3478",      // Free TURN for testing
+          username: "webrtc",
+          credential: "webrtc",
+        },
+      ],
+    },
   });
 
   peer.on("signal", (signal) => {
-    socket.emit("sending-signal", { userToSignal, callerId, signal });
+    socket.emit("send-signal", { userToSignal, callerId, signal });
   });
-
-  peer.on("error", (err) => console.error("Peer error:", err));
-
-  peer._pc.oniceconnectionstatechange = () => {
-    console.log("ICE state:", peer._pc.iceConnectionState);
-  };
 
   return peer;
 }
 
-function addPeer(callerId, stream) {
+function addPeer(incomingSignal, callerId, stream) {
   const peer = new Peer({
     initiator: false,
-    trickle: false,
+    trickle: true,
     stream,
-    config: { iceServers },
+    config: {
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        {
+          urls: "turn:global.xirsys.net:3478",
+          username: "webrtc",
+          credential: "webrtc",
+        },
+      ],
+    },
   });
 
   peer.on("signal", (signal) => {
-    socket.emit("returning-signal", { signal, callerId });
+    socket.emit("return-signal", { callerId, signal });
   });
 
-  peer.on("error", (err) => console.error("Peer error:", err));
-
-  peer._pc.oniceconnectionstatechange = () => {
-    console.log("ICE state:", peer._pc.iceConnectionState);
-  };
-
+  peer.signal(incomingSignal);
   return peer;
 }
+
+
+
+
 
 
 

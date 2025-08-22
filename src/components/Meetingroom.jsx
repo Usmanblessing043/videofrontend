@@ -1,4 +1,3 @@
-// Room.js
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import io from "socket.io-client";
@@ -12,7 +11,7 @@ export default function Room() {
   const navigate = useNavigate();
 
   const [peers, setPeers] = useState([]);
-  const peersRef = useRef({}); // ✅ now using a map instead of array
+  const peersRef = useRef({});
   const myVideo = useRef();
   const streamRef = useRef(null);
 
@@ -25,7 +24,7 @@ export default function Room() {
   useEffect(() => {
     let mounted = true;
 
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(stream => {
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {
       if (!mounted) return;
 
       myVideo.current.srcObject = stream;
@@ -35,50 +34,51 @@ export default function Room() {
 
       socket.on("host", () => setIsHost(true));
 
-      socket.on("all-users", users => {
+      // ✅ Existing users when I join
+      socket.on("all-users", (users) => {
         const peersArr = [];
-        users.forEach(userId => {
+        users.forEach((userId) => {
           if (!peersRef.current[userId]) {
             const peer = createPeer(userId, socket.id, stream);
             peersRef.current[userId] = peer;
             peersArr.push({ peerId: userId, peer });
           }
         });
-        setPeers(prev => [...prev, ...peersArr]);
+        setPeers((prev) => [...prev, ...peersArr]);
       });
 
-      socket.on("user-joined", payload => {
-        if (!peersRef.current[payload.callerId]) {
-          const peer = addPeer(payload.signal, payload.callerId, stream);
-          peersRef.current[payload.callerId] = peer;
-          setPeers(users => [...users, { peerId: payload.callerId, peer }]);
+      // ✅ A new user joined after me
+      socket.on("user-joined", ({ newUserId }) => {
+        if (!peersRef.current[newUserId]) {
+          const peer = addPeer(newUserId, stream);
+          peersRef.current[newUserId] = peer;
+          setPeers((users) => [...users, { peerId: newUserId, peer }]);
         }
       });
 
-      socket.on("signal", ({ signal, callerId }) => {
+      // ✅ Receive signal from caller
+      socket.on("receiving-signal", ({ signal, callerId }) => {
         const peer = peersRef.current[callerId];
-        if (peer) {
-          try {
-            peer.signal(signal);
-          } catch (err) {
-            console.warn("Signal error:", err.message);
-          }
-        } else {
-          console.warn("No peer found for callerId:", callerId);
-        }
+        if (peer) peer.signal(signal);
       });
 
-      socket.on("user-left", id => {
+      // ✅ Receive returned signal from callee
+      socket.on("receiving-returned-signal", ({ signal, id }) => {
+        const peer = peersRef.current[id];
+        if (peer) peer.signal(signal);
+      });
+
+      socket.on("user-left", (id) => {
         const peer = peersRef.current[id];
         if (peer) {
           peer.destroy();
           delete peersRef.current[id];
         }
-        setPeers(users => users.filter(p => p.peerId !== id));
+        setPeers((users) => users.filter((p) => p.peerId !== id));
       });
 
       socket.on("chat-message", ({ user, message }) => {
-        setMessages(prev => [...prev, { user, message }]);
+        setMessages((prev) => [...prev, { user, message }]);
       });
 
       socket.on("end-call", () => {
@@ -95,32 +95,28 @@ export default function Room() {
     };
   }, [roomId, navigate]);
 
+  // ✅ Create peer (initiator)
   function createPeer(userToSignal, callerId, stream) {
     const peer = new Peer({ initiator: true, trickle: false, stream });
 
-    peer.on("signal", signal => {
+    peer.on("signal", (signal) => {
       socket.emit("sending-signal", { userToSignal, callerId, signal });
     });
 
-    peer.on("error", err => console.error("Peer error:", err));
+    peer.on("error", (err) => console.error("Peer error:", err));
 
     return peer;
   }
 
-  function addPeer(incomingSignal, callerId, stream) {
+  // ✅ Add peer (not initiator)
+  function addPeer(callerId, stream) {
     const peer = new Peer({ initiator: false, trickle: false, stream });
 
-    peer.on("signal", signal => {
+    peer.on("signal", (signal) => {
       socket.emit("returning-signal", { signal, callerId });
     });
 
-    peer.on("error", err => console.error("Peer error:", err));
-
-    try {
-      peer.signal(incomingSignal); // ✅ immediate, no setTimeout
-    } catch (err) {
-      console.warn("AddPeer signal error:", err.message);
-    }
+    peer.on("error", (err) => console.error("Peer error:", err));
 
     return peer;
   }
@@ -144,16 +140,16 @@ export default function Room() {
   const startScreenShare = async () => {
     const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
     const screenTrack = screenStream.getVideoTracks()[0];
-    Object.values(peersRef.current).forEach(peer => {
-      const sender = peer._pc.getSenders().find(s => s.track?.kind === "video");
+    Object.values(peersRef.current).forEach((peer) => {
+      const sender = peer._pc.getSenders().find((s) => s.track?.kind === "video");
       if (sender) sender.replaceTrack(screenTrack);
     });
     myVideo.current.srcObject = screenStream;
 
     screenTrack.onended = () => {
       const videoTrack = streamRef.current.getVideoTracks()[0];
-      Object.values(peersRef.current).forEach(peer => {
-        const sender = peer._pc.getSenders().find(s => s.track?.kind === "video");
+      Object.values(peersRef.current).forEach((peer) => {
+        const sender = peer._pc.getSenders().find((s) => s.track?.kind === "video");
         if (sender) sender.replaceTrack(videoTrack);
       });
       myVideo.current.srcObject = streamRef.current;
@@ -163,7 +159,7 @@ export default function Room() {
   const sendMessage = () => {
     if (input.trim()) {
       socket.emit("chat-message", { roomId, user: socket.id, message: input });
-      setMessages(prev => [...prev, { user: "Me", message: input }]);
+      setMessages((prev) => [...prev, { user: "Me", message: input }]);
       setInput("");
     }
   };
@@ -171,14 +167,14 @@ export default function Room() {
   const endCall = () => {
     socket.emit("end-call", roomId);
     cleanup();
-    navigate("/");
+    navigate("/Dashboard");
   };
 
   const cleanup = () => {
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current.getTracks().forEach((track) => track.stop());
     }
-    Object.values(peersRef.current).forEach(peer => !peer.destroyed && peer.destroy());
+    Object.values(peersRef.current).forEach((peer) => !peer.destroyed && peer.destroy());
     peersRef.current = {};
     setPeers([]);
   };
@@ -196,17 +192,37 @@ export default function Room() {
         <button onClick={toggleMute}>{isMuted ? "Unmute" : "Mute"}</button>
         <button onClick={toggleCamera}>{isCameraOff ? "Turn Camera On" : "Turn Camera Off"}</button>
         <button onClick={startScreenShare}>Share Screen</button>
-        {isHost && <button onClick={endCall} style={{ background: "red", color: "white" }}>End Call</button>}
+        {isHost && (
+          <button onClick={endCall} style={{ background: "red", color: "white" }}>
+            End Call
+          </button>
+        )}
       </div>
       <div style={{ marginTop: "20px", width: "250px" }}>
         <h3>Chat</h3>
-        <div style={{ border: "1px solid #ccc", height: "120px", overflowY: "auto", padding: "5px", background: "#f9f9f9" }}>
+        <div
+          style={{
+            border: "1px solid #ccc",
+            height: "120px",
+            overflowY: "auto",
+            padding: "5px",
+            background: "#f9f9f9",
+          }}
+        >
           {messages.map((msg, i) => (
-            <p key={i}><strong>{msg.user}: </strong>{msg.message}</p>
+            <p key={i}>
+              <strong>{msg.user}: </strong>
+              {msg.message}
+            </p>
           ))}
         </div>
         <div style={{ display: "flex", marginTop: "5px" }}>
-          <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && sendMessage()} style={{ flex: 1 }} />
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+            style={{ flex: 1 }}
+          />
           <button onClick={sendMessage}>Send</button>
         </div>
       </div>
@@ -217,7 +233,7 @@ export default function Room() {
 function Video({ peer }) {
   const ref = useRef();
   useEffect(() => {
-    peer.on("stream", stream => (ref.current.srcObject = stream));
+    peer.on("stream", (stream) => (ref.current.srcObject = stream));
   }, [peer]);
   return <video ref={ref} autoPlay playsInline style={{ width: "300px" }} />;
 }

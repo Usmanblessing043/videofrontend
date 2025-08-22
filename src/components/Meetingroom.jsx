@@ -107,14 +107,25 @@ export default function Room() {
 
   //   return peer;
   // }
-const iceServers = [
-  { urls: "stun:stun.l.google.com:19302" },
-  {
-    urls: "turn:relay1.expressturn.com:3478",
-    username: "efwefwefwe",
-    credential: "sdfdsfsdfsdf"
-  }
-];
+  const iceServers = [
+    { urls: "stun:stun.l.google.com:19302" },
+    {
+      urls: "turn:global.relay.metered.ca:80",
+      username: "openai_demo",
+      credential: "openai_demo"
+    },
+    {
+      urls: "turn:global.relay.metered.ca:443",
+      username: "openai_demo",
+      credential: "openai_demo"
+    },
+    {
+      urls: "turn:global.relay.metered.ca:443?transport=tcp",
+      username: "openai_demo",
+      credential: "openai_demo"
+    }
+  ];
+
 
 function createPeer(userToSignal, callerId, stream) {
   const peer = new Peer({
@@ -125,11 +136,14 @@ function createPeer(userToSignal, callerId, stream) {
   });
 
   peer.on("signal", (signal) => {
-    console.log("👉 sending signal to", userToSignal);
     socket.emit("sending-signal", { userToSignal, callerId, signal });
   });
 
   peer.on("error", (err) => console.error("Peer error:", err));
+
+  peer._pc.oniceconnectionstatechange = () => {
+    console.log("ICE state:", peer._pc.iceConnectionState);
+  };
 
   return peer;
 }
@@ -143,14 +157,18 @@ function addPeer(callerId, stream) {
   });
 
   peer.on("signal", (signal) => {
-    console.log("👉 returning signal to", callerId);
     socket.emit("returning-signal", { signal, callerId });
   });
 
   peer.on("error", (err) => console.error("Peer error:", err));
 
+  peer._pc.oniceconnectionstatechange = () => {
+    console.log("ICE state:", peer._pc.iceConnectionState);
+  };
+
   return peer;
 }
+
 
 
   const toggleMute = () => {

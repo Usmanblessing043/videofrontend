@@ -46,15 +46,26 @@ export default function Room() {
         setPeers((prev) => [...prev, ...peersArr]);
       });
 
+      // socket.on("receiving-signal", ({ signal, callerId }) => {
+      //   if (!peersRef.current[callerId]) {
+      //     const peer = addPeer(signal, callerId, stream);
+      //     peersRef.current[callerId] = peer;
+      //     setPeers((prev) => [...prev, { peerId: callerId, peer }]);
+      //   } else {
+      //     peersRef.current[callerId].signal(signal);
+      //   }
+      // });
+
       socket.on("receiving-signal", ({ signal, callerId }) => {
-        if (!peersRef.current[callerId]) {
-          const peer = addPeer(signal, callerId, stream);
-          peersRef.current[callerId] = peer;
-          setPeers((prev) => [...prev, { peerId: callerId, peer }]);
-        } else {
-          peersRef.current[callerId].signal(signal);
-        }
-      });
+  if (!peersRef.current[callerId]) {
+    const peer = addPeer(signal, callerId, stream);
+    peersRef.current[callerId] = peer;
+    setPeers((prev) => [...prev, { peerId: callerId, peer }]);
+  } else {
+    peersRef.current[callerId].signal(signal); // <-- keep!
+  }
+});
+
 
       socket.on("receiving-returned-signal", ({ signal, id }) => {
         const peer = peersRef.current[id];
@@ -245,12 +256,32 @@ export default function Room() {
   );
 }
 
+// function Video({ peer }) {
+//   const ref = useRef();
+//   useEffect(() => {
+//     peer.on("stream", (stream) => {
+//       ref.current.srcObject = stream;
+//     });
+//   }, [peer]);
+//   return <video ref={ref} autoPlay playsInline style={{ width: "300px" }} />;
+// }
 function Video({ peer }) {
   const ref = useRef();
+
   useEffect(() => {
-    peer.on("stream", (stream) => {
-      ref.current.srcObject = stream;
-    });
+    const handleStream = (stream) => {
+      if (ref.current) {
+        ref.current.srcObject = stream;
+      }
+    };
+
+    peer.on("stream", handleStream);
+
+    return () => {
+      peer.removeListener("stream", handleStream);
+    };
   }, [peer]);
+
   return <video ref={ref} autoPlay playsInline style={{ width: "300px" }} />;
 }
+

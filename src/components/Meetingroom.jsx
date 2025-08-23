@@ -43,7 +43,16 @@ export default function Room() {
           }
         });
       });
+       socket.on("user-joined", (newUserId) => {
+    console.log("🆕 User joined:", newUserId);
+    const peer = createPeer(newUserId, socket.id, stream);
+    peersRef.current.push({ peerId: newUserId, peer });
+    setPeers((prev) => [...prev, { peerId: newUserId, peer }]);
+  });
 
+  return () => {
+    socket.off("user-joined");
+  };
       socket.on("receiving-signal", ({ signal, callerId }) => {
         let peer = peersRef.current[callerId];
         if (!peer) {

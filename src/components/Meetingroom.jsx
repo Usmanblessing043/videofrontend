@@ -50,9 +50,12 @@ export default function Room() {
           peer = addPeer(signal, callerId, stream);
           peersRef.current[callerId] = peer;
           setPeers((prev) => [...prev, { peerId: callerId, peer }]);
+        }else{
+          peer.signal(signal)
         }
-        peer.signal(signal); // ✅ Always apply incoming signal
+        
       });
+      
 
       socket.on("receiving-returned-signal", ({ signal, id }) => {
         const peer = peersRef.current[id];

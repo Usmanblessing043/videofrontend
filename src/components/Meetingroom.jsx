@@ -35,37 +35,24 @@ export default function Room() {
       socket.on("host", () => setIsHost(true));
 
       socket.on("all-users", (users) => {
-        const peersArr = [];
         users.forEach((userId) => {
           if (!peersRef.current[userId]) {
             const peer = createPeer(userId, socket.id, stream);
             peersRef.current[userId] = peer;
-            peersArr.push({ peerId: userId, peer });
+            setPeers((prev) => [...prev, { peerId: userId, peer }]);
           }
         });
-        setPeers((prev) => [...prev, ...peersArr]);
       });
 
-      // socket.on("receiving-signal", ({ signal, callerId }) => {
-      //   if (!peersRef.current[callerId]) {
-      //     const peer = addPeer(signal, callerId, stream);
-      //     peersRef.current[callerId] = peer;
-      //     setPeers((prev) => [...prev, { peerId: callerId, peer }]);
-      //   } else {
-      //     peersRef.current[callerId].signal(signal);
-      //   }
-      // });
-
       socket.on("receiving-signal", ({ signal, callerId }) => {
-  if (!peersRef.current[callerId]) {
-    const peer = addPeer(signal, callerId, stream);
-    peersRef.current[callerId] = peer;
-    setPeers((prev) => [...prev, { peerId: callerId, peer }]);
-  } else {
-    peersRef.current[callerId].signal(signal); // <-- keep!
-  }
-});
-
+        let peer = peersRef.current[callerId];
+        if (!peer) {
+          peer = addPeer(signal, callerId, stream);
+          peersRef.current[callerId] = peer;
+          setPeers((prev) => [...prev, { peerId: callerId, peer }]);
+        }
+        peer.signal(signal); // ✅ Always apply incoming signal
+      });
 
       socket.on("receiving-returned-signal", ({ signal, id }) => {
         const peer = peersRef.current[id];
@@ -99,10 +86,10 @@ export default function Room() {
     };
   }, [roomId, navigate]);
 
-  // ✅ TURN/STUN configuration
+  // ✅ TURN/STUN config
   const iceConfig = {
     iceServers: [
-      { urls: "stun:stun.l.google.com:19302" }, // Free STUN
+      { urls: "stun:stun.l.google.com:19302" },
       {
         urls: "turn:relay1.expressturn.com:3478",
         username: "efG3knQJwOqN1HpXj1",
@@ -120,7 +107,7 @@ export default function Room() {
     });
 
     peer.on("signal", (signal) => {
-      socket.emit("send-signal", { userToSignal, callerId, signal });
+      socket.emit("sending-signal", { userToSignal, callerId, signal });
     });
 
     peer.on("error", (err) => console.error("Peer error (initiator):", err));
@@ -137,7 +124,7 @@ export default function Room() {
     });
 
     peer.on("signal", (signal) => {
-      socket.emit("return-signal", { callerId, signal });
+      socket.emit("returning-signal", { callerId, signal });
     });
 
     peer.on("error", (err) => console.error("Peer error (answerer):", err));
@@ -256,15 +243,6 @@ export default function Room() {
   );
 }
 
-// function Video({ peer }) {
-//   const ref = useRef();
-//   useEffect(() => {
-//     peer.on("stream", (stream) => {
-//       ref.current.srcObject = stream;
-//     });
-//   }, [peer]);
-//   return <video ref={ref} autoPlay playsInline style={{ width: "300px" }} />;
-// }
 function Video({ peer }) {
   const ref = useRef();
 
@@ -284,4 +262,3 @@ function Video({ peer }) {
 
   return <video ref={ref} autoPlay playsInline style={{ width: "300px" }} />;
 }
-

@@ -99,41 +99,58 @@ export default function Room() {
     ],
   };
 
-  function createPeer(userToSignal, callerId, stream) {
-    const peer = new Peer({
-      initiator: true,
-      trickle: false,
-      stream,
-      config: iceConfig,
-    });
 
-    peer.on("signal", (signal) => {
-      socket.emit("sending-signal", { userToSignal, callerId, signal });
-    });
 
-    peer.on("error", (err) => console.error("Peer error (initiator):", err));
+  // ✅ Create Peer (initiator)
+function createPeer(userToSignal, callerId, stream) {
+  const peer = new Peer({
+    initiator: true,
+    trickle: false,
+    stream,
+    config: iceConfig,
+  });
 
-    return peer;
-  }
+  peer.on("signal", (signal) => {
+    socket.emit("sending-signal", { userToSignal, callerId, signal });
+  });
 
-  function addPeer(incomingSignal, callerId, stream) {
-    const peer = new Peer({
-      initiator: false,
-      trickle: false,
-      stream,
-      config: iceConfig,
-    });
+  peer.on("error", (err) => console.error("Peer error (initiator):", err));
 
-    peer.on("signal", (signal) => {
-      socket.emit("returning-signal", { callerId, signal });
-    });
+  return peer;
+}
 
-    peer.on("error", (err) => console.error("Peer error (answerer):", err));
+// ✅ Add Peer (answerer)
+function addPeer(incomingSignal, callerId, stream) {
+  const peer = new Peer({
+    initiator: false,
+    trickle: false,
+    stream,
+    config: iceConfig,
+  });
 
+  peer.on("signal", (signal) => {
+    socket.emit("returning-signal", { callerId, signal });
+  });
+
+  peer.on("error", (err) => console.error("Peer error (answerer):", err));
+
+  // 🚀 Fix: wrap signaling safely
+  try {
     peer.signal(incomingSignal);
-
-    return peer;
+  } catch (err) {
+    console.warn("Signal too early, will retry...");
+    setTimeout(() => {
+      try {
+        peer.signal(incomingSignal);
+      } catch (e) {
+        console.error("Retry failed:", e);
+      }
+    }, 500);
   }
+
+  return peer;
+}
+
 
   const toggleMute = () => {
     const audioTrack = streamRef.current?.getAudioTracks()[0];

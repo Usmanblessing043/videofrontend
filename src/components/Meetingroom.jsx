@@ -11,7 +11,7 @@ export default function Room() {
   const navigate = useNavigate();
 
   const [peers, setPeers] = useState([]);
-  const peersRef = useRef({});
+  const peersRef = useRef({}); // ✅ object, always keyed by peerId
   const myVideo = useRef();
   const streamRef = useRef(null);
 
@@ -43,26 +43,26 @@ export default function Room() {
           }
         });
       });
-       socket.on("user-joined", (newUserId) => {
-    console.log("🆕 User joined:", newUserId);
-    const peer = createPeer(newUserId, socket.id, stream);
-    peersRef.current.push({ peerId: newUserId, peer });
-    setPeers((prev) => [...prev, { peerId: newUserId, peer }]);
-  });
 
-  return () => {
-    socket.off("user-joined");
-  };
+      socket.on("user-joined", (newUserId) => {
+        console.log("🆕 User joined:", newUserId);
+        if (!peersRef.current[newUserId]) {
+          const peer = createPeer(newUserId, socket.id, stream);
+          peersRef.current[newUserId] = peer; // ✅ store in object
+          setPeers((prev) => [...prev, { peerId: newUserId, peer }]);
+        }
+      });
+
       socket.on("receiving-signal", ({ signal, callerId }) => {
         let peer = peersRef.current[callerId];
         if (!peer) {
           peer = addPeer(signal, callerId, stream);
           peersRef.current[callerId] = peer;
           setPeers((prev) => [...prev, { peerId: callerId, peer }]);
+        } else {
+          peer.signal(signal);
         }
-        
       });
-      
 
       socket.on("receiving-returned-signal", ({ signal, id }) => {
         const peer = peersRef.current[id];
@@ -96,7 +96,7 @@ export default function Room() {
     };
   }, [roomId, navigate]);
 
-  // ✅ TURN/STUN config
+  // TURN/STUN config
   const iceConfig = {
     iceServers: [
       { urls: "stun:stun.l.google.com:19302" },
@@ -108,58 +108,54 @@ export default function Room() {
     ],
   };
 
+  // Caller (initiator)
+  function createPeer(userToSignal, callerId, stream) {
+    const peer = new Peer({
+      initiator: true,
+      trickle: false,
+      stream,
+      config: iceConfig,
+    });
 
+    peer.on("signal", (signal) => {
+      socket.emit("sending-signal", { userToSignal, callerId, signal });
+    });
 
-  // ✅ Create Peer (initiator)
-function createPeer(userToSignal, callerId, stream) {
-  const peer = new Peer({
-    initiator: true,
-    trickle: false,
-    stream,
-    config: iceConfig,
-  });
+    peer.on("error", (err) => console.error("Peer error (initiator):", err));
 
-  peer.on("signal", (signal) => {
-    socket.emit("sending-signal", { userToSignal, callerId, signal });
-  });
-
-  peer.on("error", (err) => console.error("Peer error (initiator):", err));
-
-  return peer;
-}
-
-// ✅ Add Peer (answerer)
-function addPeer(incomingSignal, callerId, stream) {
-  const peer = new Peer({
-    initiator: false,
-    trickle: false,
-    stream,
-    config: iceConfig,
-  });
-
-  peer.on("signal", (signal) => {
-    socket.emit("returning-signal", { callerId, signal });
-  });
-
-  peer.on("error", (err) => console.error("Peer error (answerer):", err));
-
-  // 🚀 Fix: wrap signaling safely
-  try {
-    peer.signal(incomingSignal);
-  } catch (err) {
-    console.warn("Signal too early, will retry...");
-    setTimeout(() => {
-      try {
-        peer.signal(incomingSignal);
-      } catch (e) {
-        console.error("Retry failed:", e);
-      }
-    }, 500);
+    return peer;
   }
 
-  return peer;
-}
+  // Callee (answerer)
+  function addPeer(incomingSignal, callerId, stream) {
+    const peer = new Peer({
+      initiator: false,
+      trickle: false,
+      stream,
+      config: iceConfig,
+    });
 
+    peer.on("signal", (signal) => {
+      socket.emit("returning-signal", { callerId, signal });
+    });
+
+    peer.on("error", (err) => console.error("Peer error (answerer):", err));
+
+    try {
+      peer.signal(incomingSignal);
+    } catch (err) {
+      console.warn("Signal too early, retrying...");
+      setTimeout(() => {
+        try {
+          peer.signal(incomingSignal);
+        } catch (e) {
+          console.error("Retry failed:", e);
+        }
+      }, 500);
+    }
+
+    return peer;
+  }
 
   const toggleMute = () => {
     const audioTrack = streamRef.current?.getAudioTracks()[0];
@@ -180,10 +176,12 @@ function addPeer(incomingSignal, callerId, stream) {
   const startScreenShare = async () => {
     const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
     const screenTrack = screenStream.getVideoTracks()[0];
+
     Object.values(peersRef.current).forEach((peer) => {
       const sender = peer._pc.getSenders().find((s) => s.track?.kind === "video");
       if (sender) sender.replaceTrack(screenTrack);
     });
+
     myVideo.current.srcObject = screenStream;
 
     screenTrack.onended = () => {
@@ -279,9 +277,7 @@ function Video({ peer }) {
         ref.current.srcObject = stream;
       }
     };
-
     peer.on("stream", handleStream);
-
     return () => {
       peer.removeListener("stream", handleStream);
     };

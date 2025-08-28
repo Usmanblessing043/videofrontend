@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { toast } from 'react-toastify'
 import io from "socket.io-client";
 import Peer from "simple-peer";
-import './RoomMeeting.css'; // We'll create this CSS file
+import './RoomMeeting.css';
 
 const backendUrl = process.env.REACT_APP_VIDEOBACKEND_URL;
 const socket = io(`${backendUrl}/user`, {
@@ -66,11 +66,17 @@ export default function Room() {
         myVideo.current.srcObject = stream;
         streamRef.current = stream;
 
+        // Force play the video in case autoplay is blocked
+        myVideo.current.play().catch(err => {
+          console.warn("Autoplay prevented:", err);
+        });
+
         socket.emit("join-room", roomId);
 
         socket.on("host", () => setIsHost(true));
 
         socket.on("all-users", (users) => {
+          console.log("All users in room:", users);
           setParticipants(users.length + 1);
           users.forEach((userId) => {
             if (!peersRef.current[userId]) {
@@ -92,22 +98,31 @@ export default function Room() {
         });
 
         socket.on("receiving-signal", ({ signal, callerId }) => {
+          console.log("📡 Receiving signal from:", callerId);
           let peer = peersRef.current[callerId];
           if (!peer) {
+            console.log("Creating new peer for:", callerId);
             peer = addPeer(signal, callerId, stream);
             peersRef.current[callerId] = peer;
             setPeers((prev) => [...prev, { peerId: callerId, peer }]);
           } else {
+            console.log("Existing peer found, signaling:", callerId);
             peer.signal(signal);
           }
         });
 
         socket.on("receiving-returned-signal", ({ signal, id }) => {
+          console.log("📡 Receiving returned signal from:", id);
           const peer = peersRef.current[id];
-          if (peer) peer.signal(signal);
+          if (peer) {
+            peer.signal(signal);
+          } else {
+            console.warn("Peer not found for returned signal:", id);
+          }
         });
 
         socket.on("user-left", (id) => {
+          console.log("User left:", id);
           setParticipants(prev => prev - 1);
           const peer = peersRef.current[id];
           if (peer) {
@@ -128,6 +143,18 @@ export default function Room() {
           navigate("/Dashboard");
         });
 
+        // Monitor peer connections for debugging
+        const monitorInterval = setInterval(() => {
+          Object.entries(peersRef.current).forEach(([peerId, peer]) => {
+            if (peer._pc) {
+              console.log(`Peer ${peerId} connection state:`, peer._pc.connectionState);
+              console.log(`Peer ${peerId} ice connection state:`, peer._pc.iceConnectionState);
+            }
+          });
+        }, 10000);
+
+        return () => clearInterval(monitorInterval);
+
       } catch (err) {
         console.error("Error accessing media devices:", err);
         toast.error("Could not access camera/microphone. Please check permissions.");
@@ -144,12 +171,14 @@ export default function Room() {
     };
   }, [roomId, navigate]);
 
-  // TURN/STUN config with fallbacks
+  // Enhanced ICE configuration with more reliable servers
   const iceConfig = {
     iceServers: [
       { urls: "stun:stun.l.google.com:19302" },
       { urls: "stun:stun1.l.google.com:19302" },
       { urls: "stun:stun2.l.google.com:19302" },
+      { urls: "stun:stun3.l.google.com:19302" },
+      { urls: "stun:stun4.l.google.com:19302" },
       {
         urls: "turn:relay1.expressturn.com:3478",
         username: "efG3knQJwOqN1HpXj1",
@@ -159,34 +188,57 @@ export default function Room() {
         urls: "turn:numb.viagenie.ca",
         username: "webrtc@live.com",
         credential: "password"
+      },
+      {
+        urls: "turn:openrelay.metered.ca:80",
+        username: "openrelayproject",
+        credential: "openrelayproject"
+      },
+      {
+        urls: "turn:openrelay.metered.ca:443",
+        username: "openrelayproject",
+        credential: "openrelayproject"
       }
     ],
-    iceCandidatePoolSize: 10
+    iceCandidatePoolSize: 10,
+    sdpSemantics: 'unified-plan'
   };
     
   // Caller (initiator)
   function createPeer(userToSignal, callerId, stream) {
     const peer = new Peer({
       initiator: true,
-      trickle: true, // Better for slower networks
+      trickle: true,
       stream,
       config: iceConfig,
     });
 
+    // Store the stream for later access
+    peer.stream = stream;
+
     peer.on("signal", (signal) => {
+      console.log("Caller signaling to:", userToSignal);
       socket.emit("sending-signal", { userToSignal, callerId, signal });
+    });
+
+    peer.on("stream", (remoteStream) => {
+      console.log("Received remote stream from:", userToSignal);
     });
 
     peer.on("error", (err) => {
       console.error("Peer error (initiator):", err);
-      // Remove faulty peer
       delete peersRef.current[userToSignal];
       setPeers(prev => prev.filter(p => p.peerId !== userToSignal));
     });
 
     peer.on("close", () => {
+      console.log("Peer connection closed:", userToSignal);
       delete peersRef.current[userToSignal];
       setPeers(prev => prev.filter(p => p.peerId !== userToSignal));
+    });
+
+    peer.on("connect", () => {
+      console.log("Peer connected:", userToSignal);
     });
 
     return peer;
@@ -201,8 +253,16 @@ export default function Room() {
       config: iceConfig,
     });
 
+    // Store the stream for later access
+    peer.stream = stream;
+
     peer.on("signal", (signal) => {
+      console.log("Callee returning signal to:", callerId);
       socket.emit("returning-signal", { callerId, signal });
+    });
+
+    peer.on("stream", (remoteStream) => {
+      console.log("Received remote stream from:", callerId);
     });
 
     peer.on("error", (err) => {
@@ -212,8 +272,13 @@ export default function Room() {
     });
 
     peer.on("close", () => {
+      console.log("Peer connection closed:", callerId);
       delete peersRef.current[callerId];
       setPeers(prev => prev.filter(p => p.peerId !== callerId));
+    });
+
+    peer.on("connect", () => {
+      console.log("Peer connected:", callerId);
     });
 
     try {
@@ -430,13 +495,33 @@ export default function Room() {
 
 function Video({ peer, peerId }) {
   const ref = useRef();
+  const [hasVideo, setHasVideo] = useState(false);
 
   useEffect(() => {
     const handleStream = (stream) => {
-      if (ref.current) {
+      if (ref.current && stream) {
         ref.current.srcObject = stream;
+        setHasVideo(stream.getVideoTracks().length > 0);
+        
+        // Force play the video
+        ref.current.play().catch(err => {
+          console.warn("Remote video autoplay prevented:", err);
+        });
+        
+        // Check if video tracks are enabled
+        const videoTracks = stream.getVideoTracks();
+        if (videoTracks.length > 0) {
+          videoTracks[0].onended = () => {
+            setHasVideo(false);
+          };
+        }
       }
     };
+    
+    // Check if peer already has a stream
+    if (peer.stream) {
+      handleStream(peer.stream);
+    }
     
     peer.on("stream", handleStream);
     
@@ -447,9 +532,21 @@ function Video({ peer, peerId }) {
 
   return (
     <div className="video-item">
-      <video ref={ref} autoPlay playsInline />
+      <video 
+        ref={ref} 
+        autoPlay 
+        playsInline 
+        muted={false}
+        onLoadedMetadata={() => {
+          // Force play in case autoplay is blocked
+          if (ref.current) {
+            ref.current.play().catch(console.error);
+          }
+        }}
+      />
       <div className="video-overlay">
         <span>User {peerId.substring(0, 8)}</span>
+        {!hasVideo && <div className="no-video-indicator">No video</div>}
       </div>
     </div>
   );

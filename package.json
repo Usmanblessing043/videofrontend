@@ -1,9 +1,8 @@
-
 {
   "browser": {
-  "process": "process/browser",
-  "stream": "stream-browserify"
-},
+    "process": "process/browser",
+    "stream": "stream-browserify"
+  },
   "name": "podio",
   "version": "0.1.0",
   "private": true,
@@ -14,6 +13,7 @@
     "@testing-library/user-event": "^13.5.0",
     "axios": "^1.11.0",
     "formik": "^2.4.6",
+    "peerjs": "^1.5.5",
     "process": "^0.11.10",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

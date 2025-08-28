@@ -31,6 +31,7 @@ export default function Room() {
   const [isHost, setIsHost] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState("connecting");
   const [participants, setParticipants] = useState(1);
+  const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -39,16 +40,19 @@ export default function Room() {
     socket.on("connect", () => {
       console.log("Connected to server:", socket.id);
       setConnectionStatus("connected");
+      setIsConnected(true);
     });
 
     socket.on("connect_error", (err) => {
       console.error("Connection error:", err);
       setConnectionStatus("error");
+      setIsConnected(false);
       toast.error("Failed to connect to server");
     });
 
     socket.on("disconnect", () => {
       setConnectionStatus("disconnected");
+      setIsConnected(false);
     });
 
     const getMedia = async () => {
@@ -73,24 +77,35 @@ export default function Room() {
 
         socket.emit("join-room", roomId);
 
-        socket.on("host", () => setIsHost(true));
+        socket.on("host", () => {
+          console.log("I am the host");
+          setIsHost(true);
+        });
 
         socket.on("all-users", (users) => {
           console.log("All users in room:", users);
           setParticipants(users.length + 1);
-          users.forEach((userId) => {
-            if (!peersRef.current[userId]) {
-              const peer = createPeer(userId, socket.id, stream);
-              peersRef.current[userId] = peer;
-              setPeers((prev) => [...prev, { peerId: userId, peer }]);
-            }
-          });
+          
+          // Only create peers if we're the host to avoid duplicate connections
+          if (isHost) {
+            users.forEach((userId) => {
+              if (!peersRef.current[userId] && userId !== socket.id) {
+                console.log("Creating peer for user:", userId);
+                const peer = createPeer(userId, socket.id, stream);
+                peersRef.current[userId] = peer;
+                setPeers((prev) => [...prev, { peerId: userId, peer }]);
+              }
+            });
+          }
         });
 
         socket.on("user-joined", (newUserId) => {
           console.log("🆕 User joined:", newUserId);
           setParticipants(prev => prev + 1);
-          if (!peersRef.current[newUserId]) {
+          
+          // Only create peer if we're the host to avoid duplicate connections
+          if (isHost && !peersRef.current[newUserId] && newUserId !== socket.id) {
+            console.log("Creating peer for new user:", newUserId);
             const peer = createPeer(newUserId, socket.id, stream);
             peersRef.current[newUserId] = peer;
             setPeers((prev) => [...prev, { peerId: newUserId, peer }]);
@@ -99,15 +114,16 @@ export default function Room() {
 
         socket.on("receiving-signal", ({ signal, callerId }) => {
           console.log("📡 Receiving signal from:", callerId);
-          let peer = peersRef.current[callerId];
-          if (!peer) {
-            console.log("Creating new peer for:", callerId);
-            peer = addPeer(signal, callerId, stream);
+          
+          // Only respond to signals if we're not the host (to avoid duplicate connections)
+          if (!isHost && !peersRef.current[callerId] && callerId !== socket.id) {
+            console.log("Adding peer for caller:", callerId);
+            const peer = addPeer(signal, callerId, stream);
             peersRef.current[callerId] = peer;
             setPeers((prev) => [...prev, { peerId: callerId, peer }]);
-          } else {
-            console.log("Existing peer found, signaling:", callerId);
-            peer.signal(signal);
+          } else if (peersRef.current[callerId]) {
+            console.log("Signaling existing peer:", callerId);
+            peersRef.current[callerId].signal(signal);
           }
         });
 
@@ -169,7 +185,7 @@ export default function Room() {
       cleanup();
       socket.removeAllListeners();
     };
-  }, [roomId, navigate]);
+  }, [roomId, navigate, isHost]);
 
   // Enhanced ICE configuration with more reliable servers
   const iceConfig = {
@@ -204,17 +220,16 @@ export default function Room() {
     sdpSemantics: 'unified-plan'
   };
     
-  // Caller (initiator)
+  // Caller (initiator) - Only hosts should call this
   function createPeer(userToSignal, callerId, stream) {
+    console.log("Creating peer as initiator for:", userToSignal);
+    
     const peer = new Peer({
       initiator: true,
       trickle: true,
       stream,
       config: iceConfig,
     });
-
-    // Store the stream for later access
-    peer.stream = stream;
 
     peer.on("signal", (signal) => {
       console.log("Caller signaling to:", userToSignal);
@@ -244,17 +259,16 @@ export default function Room() {
     return peer;
   }
 
-  // Callee (answerer)
+  // Callee (answerer) - Only non-hosts should call this
   function addPeer(incomingSignal, callerId, stream) {
+    console.log("Adding peer as answerer for:", callerId);
+    
     const peer = new Peer({
       initiator: false,
       trickle: true,
       stream,
       config: iceConfig,
     });
-
-    // Store the stream for later access
-    peer.stream = stream;
 
     peer.on("signal", (signal) => {
       console.log("Callee returning signal to:", callerId);
@@ -417,9 +431,12 @@ export default function Room() {
           <div className="participant-count">
             <i className="fas fa-users"></i> {participants} participants
           </div>
-          <div className={`connection-status ${connectionStatus}`}>
-            {connectionStatus === "connected" ? "Connected" : 
-             connectionStatus === "connecting" ? "Connecting..." : "Disconnected"}
+          <div className="connection-info">
+            <div className={`connection-status ${connectionStatus}`}>
+              {connectionStatus === "connected" ? "Connected" : 
+              connectionStatus === "connecting" ? "Connecting..." : "Disconnected"}
+            </div>
+            {isHost && <div className="host-indicator">Host</div>}
           </div>
         </div>
         <div className="header-controls">
@@ -440,6 +457,7 @@ export default function Room() {
             <video ref={myVideo} autoPlay muted playsInline />
             <div className="video-overlay">
               <span>You {isMuted ? " (Muted)" : ""} {isCameraOff ? " (Camera Off)" : ""}</span>
+              {isHost && <span className="host-badge">Host</span>}
             </div>
           </div>
           {peers.map(({ peerId, peer }) => (
@@ -496,12 +514,14 @@ export default function Room() {
 function Video({ peer, peerId }) {
   const ref = useRef();
   const [hasVideo, setHasVideo] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const handleStream = (stream) => {
       if (ref.current && stream) {
         ref.current.srcObject = stream;
         setHasVideo(stream.getVideoTracks().length > 0);
+        setIsLoading(false);
         
         // Force play the video
         ref.current.play().catch(err => {
@@ -544,9 +564,15 @@ function Video({ peer, peerId }) {
           }
         }}
       />
+      {isLoading && (
+        <div className="video-loading">
+          <i className="fas fa-spinner fa-spin"></i>
+          <span>Connecting...</span>
+        </div>
+      )}
       <div className="video-overlay">
         <span>User {peerId.substring(0, 8)}</span>
-        {!hasVideo && <div className="no-video-indicator">No video</div>}
+        {!hasVideo && !isLoading && <div className="no-video-indicator">No video</div>}
       </div>
     </div>
   );

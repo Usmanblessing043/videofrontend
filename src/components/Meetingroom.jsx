@@ -171,17 +171,15 @@ export default function Room() {
       console.log("All users in room:", users);
       setParticipants(users.length + 1);
       
-      // Only create peers if we're the host to avoid duplicate connections
-      if (isHost) {
-        users.forEach((userId) => {
-          if (!peersRef.current[userId] && userId !== socket.id) {
-            console.log("Creating peer for user:", userId);
-            const peer = createPeer(userId, socket.id, streamRef.current);
-            peersRef.current[userId] = peer;
-            setPeers((prev) => [...prev, { peerId: userId, peer }]);
-          }
-        });
-      }
+      // Create peers for all existing users
+      users.forEach((userId) => {
+        if (!peersRef.current[userId] && userId !== socket.id) {
+          console.log("Creating peer for user:", userId);
+          const peer = createPeer(userId, socket.id, streamRef.current);
+          peersRef.current[userId] = peer;
+          setPeers((prev) => [...prev, { peerId: userId, peer }]);
+        }
+      });
     };
 
     const handleUserJoined = (newUserId) => {

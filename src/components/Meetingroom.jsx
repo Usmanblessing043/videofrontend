@@ -60,6 +60,7 @@ export default function Room() {
   const streamRef = useRef(null);
   const canvasRef = useRef();
   const frameInterval = useRef();
+  const screenStreamRef = useRef(null); // Fixed: Added screenStreamRef definition
 
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOff, setIsCameraOff] = useState(false);
@@ -279,7 +280,8 @@ export default function Room() {
     }
   };
 
-  const startScreenShare = async () => {
+  // Fixed: Properly defined toggleScreenShare function
+  const toggleScreenShare = async () => {
     try {
       if (isScreenSharing) {
         // Switch back to camera
@@ -301,6 +303,8 @@ export default function Room() {
         const screenStream = await navigator.mediaDevices.getDisplayMedia({ 
           video: { cursor: "always" }
         });
+        
+        screenStreamRef.current = screenStream;
         
         // Replace the video track in our stream
         if (streamRef.current) {
@@ -369,6 +373,9 @@ export default function Room() {
     }
     if (frameInterval.current) {
       clearInterval(frameInterval.current);
+    }
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach(track => track.stop());
     }
   };
 
@@ -458,7 +465,7 @@ export default function Room() {
             <i className={`fas ${isCameraOff ? 'fa-video-slash' : 'fa-video'}`}></i>
             {isCameraOff ? 'Camera On' : 'Camera Off'}
           </button>
-          <button onClick={startScreenShare} className={`control-btn ${isScreenSharing ? 'active' : ''}`}>
+          <button onClick={toggleScreenShare} className={`control-btn ${isScreenSharing ? 'active' : ''}`}>
             <i className="fas fa-desktop"></i>
             {isScreenSharing ? 'Stop Share' : 'Share Screen'}
           </button>

@@ -5,7 +5,6 @@ import io from "socket.io-client";
 import Peer from "simple-peer";
 import './RoomMeeting.css';
 
-// Create a custom hook for socket connection
 const useSocket = (url) => {
   const [socket, setSocket] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -91,16 +90,6 @@ export default function Room() {
         urls: "turn:numb.viagenie.ca",
         username: "webrtc@live.com",
         credential: "password"
-      },
-      {
-        urls: "turn:openrelay.metered.ca:80",
-        username: "openrelayproject",
-        credential: "openrelayproject"
-      },
-      {
-        urls: "turn:openrelay.metered.ca:443",
-        username: "openrelayproject",
-        credential: "openrelayproject"
       }
     ],
     iceCandidatePoolSize: 10
@@ -112,7 +101,7 @@ export default function Room() {
     const getMedia = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { width: 640, height: 480 }, // Reduced resolution for better performance
+          video: { width: 640, height: 480 },
           audio: true 
         });
         
@@ -124,21 +113,9 @@ export default function Room() {
         myVideo.current.srcObject = stream;
         streamRef.current = stream;
 
-        // Force play the video in case autoplay is blocked
+        // Force play the video
         myVideo.current.play().catch(err => {
           console.warn("Autoplay prevented:", err);
-          // Try again with user gesture
-          const playButton = document.createElement('button');
-          playButton.innerHTML = 'Play Video';
-          playButton.style.position = 'absolute';
-          playButton.style.top = '10px';
-          playButton.style.left = '10px';
-          playButton.style.zIndex = '100';
-          playButton.onclick = () => {
-            myVideo.current.play();
-            playButton.remove();
-          };
-          document.querySelector('.local-video').appendChild(playButton);
         });
 
         setMediaError(false);
@@ -198,7 +175,7 @@ export default function Room() {
     const handleReceivingSignal = ({ signal, callerId }) => {
       console.log("📡 Receiving signal from:", callerId);
       
-      // Only respond to signals if we're not the host (to avoid duplicate connections)
+      // Only respond to signals if we're not the host
       if (!isHost && !peersRef.current[callerId] && callerId !== socket.id) {
         console.log("Adding peer for caller:", callerId);
         const peer = addPeer(signal, callerId, streamRef.current);
@@ -217,12 +194,6 @@ export default function Room() {
         peer.signal(signal);
       } else {
         console.warn("Peer not found for returned signal:", id);
-        // Try to create a new peer if not found
-        if (!isHost && streamRef.current) {
-          const newPeer = addPeer(signal, id, streamRef.current);
-          peersRef.current[id] = newPeer;
-          setPeers((prev) => [...prev, { peerId: id, peer: newPeer }]);
-        }
       }
     };
 
@@ -238,14 +209,18 @@ export default function Room() {
       toast.info(`Participant left the meeting`);
     };
 
-    const handleChatMessage = ({ user, message }) => {
-      setMessages((prev) => [...prev, { user, message }]);
+    const handleChatMessage = ({ user, message, timestamp }) => {
+      setMessages((prev) => [...prev, { user, message, timestamp }]);
     };
 
     const handleEndCall = () => {
       toast.success("Meeting has ended by host");
       cleanup();
       navigate("/Dashboard");
+    };
+
+    const handleParticipantCount = (count) => {
+      setParticipants(count);
     };
 
     // Add event listeners
@@ -257,6 +232,7 @@ export default function Room() {
     socket.on("user-left", handleUserLeft);
     socket.on("chat-message", handleChatMessage);
     socket.on("end-call", handleEndCall);
+    socket.on("participant-count", handleParticipantCount);
 
     // Join room when socket is connected and we have media
     if (isConnected && !joinedRoom && streamRef.current) {
@@ -275,16 +251,17 @@ export default function Room() {
       socket.off("user-left", handleUserLeft);
       socket.off("chat-message", handleChatMessage);
       socket.off("end-call", handleEndCall);
+      socket.off("participant-count", handleParticipantCount);
     };
   }, [socket, isConnected, roomId, isHost, navigate, joinedRoom]);
 
-  // Caller (initiator) - Only hosts should call this
+  // Caller (initiator)
   const createPeer = (userToSignal, callerId, stream) => {
     console.log("Creating peer as initiator for:", userToSignal);
     
     const peer = new Peer({
       initiator: true,
-      trickle: true, // Enable trickle ICE for faster connection
+      trickle: true,
       stream,
       config: iceConfig,
     });
@@ -300,6 +277,10 @@ export default function Room() {
 
     peer.on("stream", (remoteStream) => {
       console.log("Received remote stream from:", userToSignal);
+      // Update the peer with the stream
+      setPeers(prev => prev.map(p => 
+        p.peerId === userToSignal ? { ...p, stream: remoteStream } : p
+      ));
     });
 
     peer.on("error", (err) => {
@@ -321,7 +302,7 @@ export default function Room() {
     return peer;
   };
 
-  // Callee (answerer) - Only non-hosts should call this
+  // Callee (answerer)
   const addPeer = (incomingSignal, callerId, stream) => {
     console.log("Adding peer as answerer for:", callerId);
     
@@ -335,7 +316,7 @@ export default function Room() {
     peer.on("signal", (signal) => {
       console.log("Callee returning signal to:", callerId);
       if (socket && socket.connected) {
-        socket.emit("returning-signal", { signal, id: socket.id });
+        socket.emit("returning-signal", { signal, callerId });
       } else {
         console.error("Cannot return signal - socket not connected");
       }
@@ -343,6 +324,10 @@ export default function Room() {
 
     peer.on("stream", (remoteStream) => {
       console.log("Received remote stream from:", callerId);
+      // Update the peer with the stream
+      setPeers(prev => prev.map(p => 
+        p.peerId === callerId ? { ...p, stream: remoteStream } : p
+      ));
     });
 
     peer.on("error", (err) => {
@@ -456,7 +441,6 @@ export default function Room() {
   const sendMessage = () => {
     if (input.trim() && socket && socket.connected) {
       socket.emit("chat-message", { roomId, user: socket.id, message: input });
-      setMessages((prev) => [...prev, { user: "You", message: input, isMe: true }]);
       setInput("");
     } else if (!socket || !socket.connected) {
       toast.error("Cannot send message - not connected to server");
@@ -553,8 +537,8 @@ export default function Room() {
               {isHost && <span className="host-badge">Host</span>}
             </div>
           </div>
-          {peers.map(({ peerId, peer }) => (
-            <Video key={peerId} peer={peer} peerId={peerId} />
+          {peers.map(({ peerId, peer, stream }) => (
+            <Video key={peerId} peer={peer} peerId={peerId} stream={stream} />
           ))}
         </div>
 
@@ -581,9 +565,10 @@ export default function Room() {
         </div>
         <div className="chat-messages">
           {messages.map((msg, i) => (
-            <div key={i} className={`message ${msg.isMe ? 'my-message' : 'their-message'}`}>
-              <div className="message-sender">{msg.user}</div>
+            <div key={i} className={`message ${msg.user === socket.id ? 'my-message' : 'their-message'}`}>
+              <div className="message-sender">{msg.user === socket.id ? 'You' : msg.user}</div>
               <div className="message-content">{msg.message}</div>
+              <div className="message-time">{new Date(msg.timestamp).toLocaleTimeString()}</div>
             </div>
           ))}
         </div>
@@ -605,7 +590,7 @@ export default function Room() {
   );
 }
 
-function Video({ peer, peerId }) {
+function Video({ peer, peerId, stream }) {
   const ref = useRef();
   const [hasVideo, setHasVideo] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -642,11 +627,12 @@ function Video({ peer, peerId }) {
       setConnectionState("disconnected");
     };
 
-    // Check if peer already has a stream
-    if (peer.stream) {
-      handleStream(peer.stream);
+    // If we already have a stream, use it
+    if (stream) {
+      handleStream(stream);
     }
     
+    // Set up event listeners
     peer.on("stream", handleStream);
     peer.on("connect", handleConnect);
     peer.on("error", handleError);
@@ -661,11 +647,6 @@ function Video({ peer, peerId }) {
         if (state === "connected" && isLoading) {
           setIsLoading(false);
         }
-        
-        // If stuck for too long, try to reconnect
-        if (state === "connecting" && isLoading) {
-          console.log("Peer is still connecting:", peerId);
-        }
       }
     }, 1000);
     
@@ -676,7 +657,7 @@ function Video({ peer, peerId }) {
       peer.removeListener("close", handleClose);
       clearInterval(interval);
     };
-  }, [peer, peerId, isLoading]);
+  }, [peer, peerId, isLoading, stream]);
 
   // Show different status based on connection state
   const getStatusText = () => {

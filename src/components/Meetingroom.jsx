@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { toast } from 'react-toastify';
 import io from "socket.io-client";
-import Peer from "simple-peer";
 import './RoomMeeting.css';
 
 const useSocket = (url) => {
@@ -57,11 +56,10 @@ export default function Room() {
   const backendUrl = process.env.REACT_APP_VIDEOBACKEND_URL || "http://localhost:3022";
   const { socket, isConnected } = useSocket(`${backendUrl}/user`);
 
-  const [peers, setPeers] = useState([]);
-  const peersRef = useRef({});
   const myVideo = useRef();
   const streamRef = useRef(null);
-  const screenStreamRef = useRef(null);
+  const canvasRef = useRef();
+  const frameInterval = useRef();
 
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOff, setIsCameraOff] = useState(false);
@@ -72,28 +70,15 @@ export default function Room() {
   const [participants, setParticipants] = useState(1);
   const [mediaError, setMediaError] = useState(false);
   const [joinedRoom, setJoinedRoom] = useState(false);
+  const [remoteVideos, setRemoteVideos] = useState({});
+  const [username, setUsername] = useState("");
 
-  // Enhanced ICE configuration with more reliable servers
-  const iceConfig = {
-    iceServers: [
-      { urls: "stun:stun.l.google.com:19302" },
-      { urls: "stun:stun1.l.google.com:19302" },
-      { urls: "stun:stun2.l.google.com:19302" },
-      { urls: "stun:stun3.l.google.com:19302" },
-      { urls: "stun:stun4.l.google.com:19302" },
-      {
-        urls: "turn:relay1.expressturn.com:3478",
-        username: "efG3knQJwOqN1HpXj1",
-        credential: "8cG2RzTgN5kGv9P4",
-      },
-      {
-        urls: "turn:numb.viagenie.ca",
-        username: "webrtc@live.com",
-        credential: "password"
-      }
-    ],
-    iceCandidatePoolSize: 10
-  };
+  useEffect(() => {
+    // Get username from localStorage or prompt
+    const savedUsername = localStorage.getItem('username') || `User${Math.floor(Math.random() * 1000)}`;
+    setUsername(savedUsername);
+    localStorage.setItem('username', savedUsername);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -101,7 +86,7 @@ export default function Room() {
     const getMedia = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { width: 640, height: 480 },
+          video: { width: 320, height: 240 }, // Lower resolution for better performance
           audio: true 
         });
         
@@ -119,6 +104,9 @@ export default function Room() {
         });
 
         setMediaError(false);
+
+        // Start capturing and sending frames
+        startFrameCapture();
       } catch (err) {
         console.error("Error accessing media devices:", err);
         toast.error("Could not access camera/microphone. Please check permissions.");
@@ -133,6 +121,9 @@ export default function Room() {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
       }
+      if (frameInterval.current) {
+        clearInterval(frameInterval.current);
+      }
     };
   }, []);
 
@@ -144,73 +135,57 @@ export default function Room() {
       setIsHost(true);
     };
 
-    const handleAllUsers = (users) => {
-      console.log("All users in room:", users);
-      setParticipants(users.length + 1);
+    const handleUserJoined = (data) => {
+      console.log("🆕 User joined:", data.userId, data.username);
+      setParticipants(prev => prev + 1);
+      toast.info(`${data.username || 'User'} joined the meeting`);
       
-      // Create peers for all existing users
-      users.forEach((userId) => {
-        if (!peersRef.current[userId] && userId !== socket.id) {
-          console.log("Creating peer for user:", userId);
-          const peer = createPeer(userId, socket.id, streamRef.current);
-          peersRef.current[userId] = peer;
-          setPeers((prev) => [...prev, { peerId: userId, peer }]);
+      // Create a container for the new user's video
+      setRemoteVideos(prev => ({
+        ...prev,
+        [data.userId]: { username: data.username || 'User' }
+      }));
+    };
+
+    const handleUserLeft = (userId) => {
+      console.log("User left:", userId);
+      setParticipants(prev => prev - 1);
+      
+      // Remove the user's video
+      setRemoteVideos(prev => {
+        const newVideos = { ...prev };
+        delete newVideos[userId];
+        return newVideos;
+      });
+      
+      toast.info("Participant left the meeting");
+    };
+
+    const handleVideoFrame = (data) => {
+      // Update the remote video with the received frame
+      setRemoteVideos(prev => {
+        if (!prev[data.userId]) {
+          return {
+            ...prev,
+            [data.userId]: { 
+              username: data.username || 'User', 
+              frame: data.frame 
+            }
+          };
         }
+        
+        return {
+          ...prev,
+          [data.userId]: {
+            ...prev[data.userId],
+            frame: data.frame
+          }
+        };
       });
     };
 
-    const handleUserJoined = (newUserId) => {
-      console.log("🆕 User joined:", newUserId);
-      setParticipants(prev => prev + 1);
-      
-      // Only create peer if we're the host to avoid duplicate connections
-      if (isHost && !peersRef.current[newUserId] && newUserId !== socket.id) {
-        console.log("Creating peer for new user:", newUserId);
-        const peer = createPeer(newUserId, socket.id, streamRef.current);
-        peersRef.current[newUserId] = peer;
-        setPeers((prev) => [...prev, { peerId: newUserId, peer }]);
-      }
-    };
-
-    const handleReceivingSignal = ({ signal, callerId }) => {
-      console.log("📡 Receiving signal from:", callerId);
-      
-      // Only respond to signals if we're not the host
-      if (!isHost && !peersRef.current[callerId] && callerId !== socket.id) {
-        console.log("Adding peer for caller:", callerId);
-        const peer = addPeer(signal, callerId, streamRef.current);
-        peersRef.current[callerId] = peer;
-        setPeers((prev) => [...prev, { peerId: callerId, peer }]);
-      } else if (peersRef.current[callerId]) {
-        console.log("Signaling existing peer:", callerId);
-        peersRef.current[callerId].signal(signal);
-      }
-    };
-
-    const handleReceivingReturnedSignal = ({ signal, id }) => {
-      console.log("📡 Receiving returned signal from:", id);
-      const peer = peersRef.current[id];
-      if (peer) {
-        peer.signal(signal);
-      } else {
-        console.warn("Peer not found for returned signal:", id);
-      }
-    };
-
-    const handleUserLeft = (id) => {
-      console.log("User left:", id);
-      setParticipants(prev => prev - 1);
-      const peer = peersRef.current[id];
-      if (peer) {
-        peer.destroy();
-        delete peersRef.current[id];
-      }
-      setPeers(users => users.filter(p => p.peerId !== id));
-      toast.info(`Participant left the meeting`);
-    };
-
-    const handleChatMessage = ({ user, message, timestamp }) => {
-      setMessages((prev) => [...prev, { user, message, timestamp }]);
+    const handleChatMessage = (data) => {
+      setMessages((prev) => [...prev, data]);
     };
 
     const handleEndCall = () => {
@@ -225,18 +200,16 @@ export default function Room() {
 
     // Add event listeners
     socket.on("host", handleHost);
-    socket.on("all-users", handleAllUsers);
     socket.on("user-joined", handleUserJoined);
-    socket.on("receiving-signal", handleReceivingSignal);
-    socket.on("receiving-returned-signal", handleReceivingReturnedSignal);
     socket.on("user-left", handleUserLeft);
+    socket.on("video-frame", handleVideoFrame);
     socket.on("chat-message", handleChatMessage);
     socket.on("end-call", handleEndCall);
     socket.on("participant-count", handleParticipantCount);
 
     // Join room when socket is connected and we have media
     if (isConnected && !joinedRoom && streamRef.current) {
-      socket.emit("join-room", roomId);
+      socket.emit("join-room", { roomId, username });
       setJoinedRoom(true);
       console.log("Joined room:", roomId);
     }
@@ -244,122 +217,46 @@ export default function Room() {
     return () => {
       // Remove event listeners
       socket.off("host", handleHost);
-      socket.off("all-users", handleAllUsers);
       socket.off("user-joined", handleUserJoined);
-      socket.off("receiving-signal", handleReceivingSignal);
-      socket.off("receiving-returned-signal", handleReceivingReturnedSignal);
       socket.off("user-left", handleUserLeft);
+      socket.off("video-frame", handleVideoFrame);
       socket.off("chat-message", handleChatMessage);
       socket.off("end-call", handleEndCall);
       socket.off("participant-count", handleParticipantCount);
     };
-  }, [socket, isConnected, roomId, isHost, navigate, joinedRoom]);
+  }, [socket, isConnected, roomId, navigate, joinedRoom, username]);
 
-  // Caller (initiator)
-  const createPeer = (userToSignal, callerId, stream) => {
-    console.log("Creating peer as initiator for:", userToSignal);
-    
-    const peer = new Peer({
-      initiator: true,
-      trickle: true,
-      stream,
-      config: iceConfig,
-    });
-
-    peer.on("signal", (signal) => {
-      console.log("Caller signaling to:", userToSignal);
-      if (socket && socket.connected) {
-        socket.emit("sending-signal", { userToSignal, callerId, signal });
-      } else {
-        console.error("Cannot send signal - socket not connected");
-      }
-    });
-
-    peer.on("stream", (remoteStream) => {
-      console.log("Received remote stream from:", userToSignal);
-      // Update the peer with the stream
-      setPeers(prev => prev.map(p => 
-        p.peerId === userToSignal ? { ...p, stream: remoteStream } : p
-      ));
-    });
-
-    peer.on("error", (err) => {
-      console.error("Peer error (initiator):", err);
-      delete peersRef.current[userToSignal];
-      setPeers(prev => prev.filter(p => p.peerId !== userToSignal));
-    });
-
-    peer.on("close", () => {
-      console.log("Peer connection closed:", userToSignal);
-      delete peersRef.current[userToSignal];
-      setPeers(prev => prev.filter(p => p.peerId !== userToSignal));
-    });
-
-    peer.on("connect", () => {
-      console.log("Peer connected:", userToSignal);
-    });
-
-    return peer;
-  };
-
-  // Callee (answerer)
-  const addPeer = (incomingSignal, callerId, stream) => {
-    console.log("Adding peer as answerer for:", callerId);
-    
-    const peer = new Peer({
-      initiator: false,
-      trickle: true,
-      stream,
-      config: iceConfig,
-    });
-
-    peer.on("signal", (signal) => {
-      console.log("Callee returning signal to:", callerId);
-      if (socket && socket.connected) {
-        socket.emit("returning-signal", { signal, callerId });
-      } else {
-        console.error("Cannot return signal - socket not connected");
-      }
-    });
-
-    peer.on("stream", (remoteStream) => {
-      console.log("Received remote stream from:", callerId);
-      // Update the peer with the stream
-      setPeers(prev => prev.map(p => 
-        p.peerId === callerId ? { ...p, stream: remoteStream } : p
-      ));
-    });
-
-    peer.on("error", (err) => {
-      console.error("Peer error (answerer):", err);
-      delete peersRef.current[callerId];
-      setPeers(prev => prev.filter(p => p.peerId !== callerId));
-    });
-
-    peer.on("close", () => {
-      console.log("Peer connection closed:", callerId);
-      delete peersRef.current[callerId];
-      setPeers(prev => prev.filter(p => p.peerId !== callerId));
-    });
-
-    peer.on("connect", () => {
-      console.log("Peer connected:", callerId);
-    });
-
-    try {
-      peer.signal(incomingSignal);
-    } catch (err) {
-      console.warn("Signal too early, retrying...");
-      setTimeout(() => {
-        try {
-          peer.signal(incomingSignal);
-        } catch (e) {
-          console.error("Retry failed:", e);
-        }
-      }, 1000);
+  const startFrameCapture = () => {
+    if (!canvasRef.current) {
+      canvasRef.current = document.createElement('canvas');
+      canvasRef.current.width = 320;
+      canvasRef.current.height = 240;
     }
-
-    return peer;
+    
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    
+    // Capture and send frames at a reasonable interval
+    frameInterval.current = setInterval(() => {
+      if (streamRef.current && !isCameraOff && socket && socket.connected) {
+        try {
+          // Draw current video frame to canvas
+          ctx.drawImage(myVideo.current, 0, 0, canvas.width, canvas.height);
+          
+          // Convert to data URL (JPEG with lower quality for smaller size)
+          const frameData = canvas.toDataURL('image/jpeg', 0.4);
+          
+          // Send frame to server
+          socket.emit("video-frame", {
+            roomId,
+            frame: frameData,
+            username
+          });
+        } catch (err) {
+          console.error("Error capturing frame:", err);
+        }
+      }
+    }, 200); // 5 FPS - adjust based on performance needs
   };
 
   const toggleMute = () => {
@@ -386,14 +283,12 @@ export default function Room() {
     try {
       if (isScreenSharing) {
         // Switch back to camera
-        Object.values(peersRef.current).forEach((peer) => {
-          const sender = peer._pc.getSenders().find((s) => s.track?.kind === "video");
-          if (sender && streamRef.current) {
-            const videoTrack = streamRef.current.getVideoTracks()[0];
-            sender.replaceTrack(videoTrack);
+        if (streamRef.current) {
+          const videoTrack = streamRef.current.getVideoTracks()[0];
+          if (videoTrack) {
+            videoTrack.enabled = true;
           }
-        });
-        myVideo.current.srcObject = streamRef.current;
+        }
         setIsScreenSharing(false);
         
         // Stop screen stream
@@ -404,32 +299,23 @@ export default function Room() {
       } else {
         // Start screen share
         const screenStream = await navigator.mediaDevices.getDisplayMedia({ 
-          video: { cursor: "always" }, 
-          audio: true 
+          video: { cursor: "always" }
         });
-        screenStreamRef.current = screenStream;
         
-        const screenTrack = screenStream.getVideoTracks()[0];
-        Object.values(peersRef.current).forEach((peer) => {
-          const sender = peer._pc.getSenders().find((s) => s.track?.kind === "video");
-          if (sender) sender.replaceTrack(screenTrack);
-        });
-
-        myVideo.current.srcObject = screenStream;
+        // Replace the video track in our stream
+        if (streamRef.current) {
+          const videoTrack = streamRef.current.getVideoTracks()[0];
+          if (videoTrack) {
+            videoTrack.stop();
+            streamRef.current.addTrack(screenStream.getVideoTracks()[0]);
+          }
+        }
+        
         setIsScreenSharing(true);
 
-        screenTrack.onended = () => {
+        screenStream.getVideoTracks()[0].onended = () => {
           // Switch back to camera when screen share ends
-          if (streamRef.current) {
-            const videoTrack = streamRef.current.getVideoTracks()[0];
-            Object.values(peersRef.current).forEach((peer) => {
-              const sender = peer._pc.getSenders().find((s) => s.track?.kind === "video");
-              if (sender) sender.replaceTrack(videoTrack);
-            });
-            myVideo.current.srcObject = streamRef.current;
-            setIsScreenSharing(false);
-            screenStreamRef.current = null;
-          }
+          toggleScreenShare();
         };
       }
     } catch (err) {
@@ -440,7 +326,14 @@ export default function Room() {
 
   const sendMessage = () => {
     if (input.trim() && socket && socket.connected) {
-      socket.emit("chat-message", { roomId, user: socket.id, message: input });
+      const messageData = {
+        roomId,
+        user: username,
+        message: input.trim(),
+        timestamp: new Date().toISOString()
+      };
+      
+      socket.emit("chat-message", messageData);
       setInput("");
     } else if (!socket || !socket.connected) {
       toast.error("Cannot send message - not connected to server");
@@ -474,12 +367,9 @@ export default function Room() {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
     }
-    if (screenStreamRef.current) {
-      screenStreamRef.current.getTracks().forEach((track) => track.stop());
+    if (frameInterval.current) {
+      clearInterval(frameInterval.current);
     }
-    Object.values(peersRef.current).forEach((peer) => !peer.destroyed && peer.destroy());
-    peersRef.current = {};
-    setPeers([]);
   };
 
   if (mediaError) {
@@ -533,12 +423,29 @@ export default function Room() {
           <div className="video-item local-video">
             <video ref={myVideo} autoPlay muted playsInline />
             <div className="video-overlay">
-              <span>You {isMuted ? " (Muted)" : ""} {isCameraOff ? " (Camera Off)" : ""}</span>
+              <span>{username} {isMuted ? " (Muted)" : ""} {isCameraOff ? " (Camera Off)" : ""}</span>
               {isHost && <span className="host-badge">Host</span>}
             </div>
           </div>
-          {peers.map(({ peerId, peer, stream }) => (
-            <Video key={peerId} peer={peer} peerId={peerId} stream={stream} />
+          
+          {Object.entries(remoteVideos).map(([userId, videoData]) => (
+            <div key={userId} className="video-item">
+              {videoData.frame ? (
+                <img 
+                  src={videoData.frame} 
+                  alt={`Video from ${videoData.username}`}
+                  className="remote-video-frame"
+                />
+              ) : (
+                <div className="video-placeholder">
+                  <i className="fas fa-user"></i>
+                  <span>Connecting...</span>
+                </div>
+              )}
+              <div className="video-overlay">
+                <span>{videoData.username}</span>
+              </div>
+            </div>
           ))}
         </div>
 
@@ -565,8 +472,8 @@ export default function Room() {
         </div>
         <div className="chat-messages">
           {messages.map((msg, i) => (
-            <div key={i} className={`message ${msg.user === socket.id ? 'my-message' : 'their-message'}`}>
-              <div className="message-sender">{msg.user === socket.id ? 'You' : msg.user}</div>
+            <div key={i} className={`message ${msg.user === username ? 'my-message' : 'their-message'}`}>
+              <div className="message-sender">{msg.user === username ? 'You' : msg.user}</div>
               <div className="message-content">{msg.message}</div>
               <div className="message-time">{new Date(msg.timestamp).toLocaleTimeString()}</div>
             </div>
@@ -585,119 +492,6 @@ export default function Room() {
             <i className="fas fa-paper-plane"></i>
           </button>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function Video({ peer, peerId, stream }) {
-  const ref = useRef();
-  const [hasVideo, setHasVideo] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [connectionState, setConnectionState] = useState("connecting");
-
-  useEffect(() => {
-    const handleStream = (stream) => {
-      if (ref.current && stream) {
-        ref.current.srcObject = stream;
-        setHasVideo(stream.getVideoTracks().length > 0);
-        setIsLoading(false);
-        setConnectionState("connected");
-        
-        // Force play the video
-        ref.current.play().catch(err => {
-          console.warn("Remote video autoplay prevented:", err);
-        });
-      }
-    };
-    
-    const handleConnect = () => {
-      console.log("Peer connected:", peerId);
-      setConnectionState("connected");
-      setIsLoading(false);
-    };
-    
-    const handleError = (err) => {
-      console.error("Peer error:", err);
-      setConnectionState("failed");
-    };
-    
-    const handleClose = () => {
-      console.log("Peer connection closed:", peerId);
-      setConnectionState("disconnected");
-    };
-
-    // If we already have a stream, use it
-    if (stream) {
-      handleStream(stream);
-    }
-    
-    // Set up event listeners
-    peer.on("stream", handleStream);
-    peer.on("connect", handleConnect);
-    peer.on("error", handleError);
-    peer.on("close", handleClose);
-    
-    // Check connection state periodically
-    const interval = setInterval(() => {
-      if (peer._pc) {
-        const state = peer._pc.connectionState;
-        setConnectionState(state);
-        
-        if (state === "connected" && isLoading) {
-          setIsLoading(false);
-        }
-      }
-    }, 1000);
-    
-    return () => {
-      peer.removeListener("stream", handleStream);
-      peer.removeListener("connect", handleConnect);
-      peer.removeListener("error", handleError);
-      peer.removeListener("close", handleClose);
-      clearInterval(interval);
-    };
-  }, [peer, peerId, isLoading, stream]);
-
-  // Show different status based on connection state
-  const getStatusText = () => {
-    if (isLoading) {
-      switch (connectionState) {
-        case "connecting": return "Connecting...";
-        case "checking": return "Checking...";
-        case "connected": return "Loading...";
-        case "disconnected": return "Disconnected";
-        case "failed": return "Connection Failed";
-        default: return "Connecting...";
-      }
-    }
-    return "";
-  };
-
-  return (
-    <div className="video-item">
-      <video 
-        ref={ref} 
-        autoPlay 
-        playsInline 
-        muted={false}
-        onLoadedMetadata={() => {
-          // Force play in case autoplay is blocked
-          if (ref.current) {
-            ref.current.play().catch(console.error);
-          }
-        }}
-      />
-      {isLoading && (
-        <div className="video-loading">
-          <i className="fas fa-spinner fa-spin"></i>
-          <span>{getStatusText()}</span>
-        </div>
-      )}
-      <div className="video-overlay">
-        <span>User {peerId.substring(0, 8)}</span>
-        <div className={`connection-dot ${connectionState}`} title={connectionState}></div>
-        {!hasVideo && !isLoading && <div className="no-video-indicator">No video</div>}
       </div>
     </div>
   );

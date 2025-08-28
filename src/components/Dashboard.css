@@ -1,0 +1,29 @@
+.startjoin{
+    display: flex;
+    gap: 5px;
+  }
+  .startjoin button{
+    background-color: red;
+    transition: none;
+  }
+  .startjoin button:hover{
+    background-color: red;
+  }
+  .dash{
+    padding-left: 3px;
+    background-color:wheat;
+    height: 100vh;
+    box-sizing: border-box;
+  }
+  *{
+    /* background-color: azure; */
+    padding: 0;
+    margin: 0;
+    box-sizing: border-box;
+  }
+  .na{
+    font-size: 20px;
+    font-weight: 600;
+  }
+  
+  

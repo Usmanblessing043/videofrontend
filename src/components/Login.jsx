@@ -60,6 +60,7 @@ const Login = () => {
             </video>
             <div className="signupcontainer">
                 <h1>Login for Video Conference</h1>
+                <br />
                 <form action="" onSubmit={formik.handleSubmit}>
                    
                     <div className="lab">
@@ -76,6 +77,7 @@ const Login = () => {
                     <small>{formik.touched.password && formik.errors.password}</small>
                     <br />
                     <p class="login-link">Don't have an account? <Link className='link' to={"/Signup"}>Sign up</Link></p>
+                    <br />
                     <button className='bbt' disabled = {loading} type="submit">{loading ? "loading...." : 'Login'}</button>
                 </form>
             </div>

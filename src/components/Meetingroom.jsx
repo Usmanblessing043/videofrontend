@@ -5,13 +5,8 @@ import io from "socket.io-client";
 import Peer from "simple-peer";
 import './RoomMeeting.css';
 
-const backendUrl = process.env.REACT_APP_VIDEOBACKEND_URL;
-const socket = io(`${backendUrl}/user`, {
-  transports: ['websocket', 'polling'],
-  reconnection: true,
-  reconnectionAttempts: 5,
-  reconnectionDelay: 1000
-});
+// Create socket instance outside component to prevent multiple connections
+let socket = null;
 
 export default function Room() {
   const { roomId } = useParams();
@@ -36,24 +31,67 @@ export default function Room() {
   useEffect(() => {
     let mounted = true;
 
+    // Initialize socket connection only once
+    if (!socket) {
+      const backendUrl = process.env.REACT_APP_VIDEOBACKEND_URL;
+      socket = io(`${backendUrl}/user`, {
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        timeout: 20000,
+        forceNew: true
+      });
+    }
+
     // Socket connection events
-    socket.on("connect", () => {
+    const handleConnect = () => {
       console.log("Connected to server:", socket.id);
       setConnectionStatus("connected");
       setIsConnected(true);
-    });
+    };
 
-    socket.on("connect_error", (err) => {
+    const handleConnectError = (err) => {
       console.error("Connection error:", err);
       setConnectionStatus("error");
       setIsConnected(false);
       toast.error("Failed to connect to server");
-    });
+    };
 
-    socket.on("disconnect", () => {
+    const handleDisconnect = (reason) => {
+      console.log("Disconnected from server:", reason);
       setConnectionStatus("disconnected");
       setIsConnected(false);
-    });
+      
+      if (reason === "io server disconnect") {
+        // The server has forcefully disconnected the socket
+        socket.connect();
+      }
+    };
+
+    const handleReconnect = (attempt) => {
+      console.log("Reconnecting to server, attempt:", attempt);
+      setConnectionStatus("connecting");
+    };
+
+    const handleReconnectError = (err) => {
+      console.error("Reconnection error:", err);
+      setConnectionStatus("error");
+    };
+
+    const handleReconnectFailed = () => {
+      console.error("Reconnection failed");
+      setConnectionStatus("error");
+      toast.error("Failed to reconnect to server");
+    };
+
+    // Add event listeners
+    socket.on("connect", handleConnect);
+    socket.on("connect_error", handleConnectError);
+    socket.on("disconnect", handleDisconnect);
+    socket.on("reconnect", handleReconnect);
+    socket.on("reconnect_error", handleReconnectError);
+    socket.on("reconnect_failed", handleReconnectFailed);
 
     const getMedia = async () => {
       try {
@@ -75,7 +113,15 @@ export default function Room() {
           console.warn("Autoplay prevented:", err);
         });
 
-        socket.emit("join-room", roomId);
+        // Only join room if socket is connected
+        if (socket.connected) {
+          socket.emit("join-room", roomId);
+        } else {
+          // Wait for connection before joining room
+          socket.once("connect", () => {
+            socket.emit("join-room", roomId);
+          });
+        }
 
         socket.on("host", () => {
           console.log("I am the host");
@@ -182,8 +228,33 @@ export default function Room() {
 
     return () => {
       mounted = false;
-      cleanup();
-      socket.removeAllListeners();
+      
+      // Clean up socket listeners but don't disconnect the socket
+      socket.off("connect");
+      socket.off("connect_error");
+      socket.off("disconnect");
+      socket.off("reconnect");
+      socket.off("reconnect_error");
+      socket.off("reconnect_failed");
+      socket.off("host");
+      socket.off("all-users");
+      socket.off("user-joined");
+      socket.off("receiving-signal");
+      socket.off("receiving-returned-signal");
+      socket.off("user-left");
+      socket.off("chat-message");
+      socket.off("end-call");
+      
+      // Only cleanup media streams, not the socket connection
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      }
+      if (screenStreamRef.current) {
+        screenStreamRef.current.getTracks().forEach((track) => track.stop());
+      }
+      Object.values(peersRef.current).forEach((peer) => !peer.destroyed && peer.destroy());
+      peersRef.current = {};
+      setPeers([]);
     };
   }, [roomId, navigate, isHost]);
 
@@ -233,7 +304,11 @@ export default function Room() {
 
     peer.on("signal", (signal) => {
       console.log("Caller signaling to:", userToSignal);
-      socket.emit("sending-signal", { userToSignal, callerId, signal });
+      if (socket.connected) {
+        socket.emit("sending-signal", { userToSignal, callerId, signal });
+      } else {
+        console.error("Cannot send signal - socket not connected");
+      }
     });
 
     peer.on("stream", (remoteStream) => {
@@ -272,7 +347,11 @@ export default function Room() {
 
     peer.on("signal", (signal) => {
       console.log("Callee returning signal to:", callerId);
-      socket.emit("returning-signal", { callerId, signal });
+      if (socket.connected) {
+        socket.emit("returning-signal", { callerId, signal });
+      } else {
+        console.error("Cannot return signal - socket not connected");
+      }
     });
 
     peer.on("stream", (remoteStream) => {
@@ -388,16 +467,20 @@ export default function Room() {
   };
 
   const sendMessage = () => {
-    if (input.trim()) {
+    if (input.trim() && socket.connected) {
       socket.emit("chat-message", { roomId, user: socket.id, message: input });
       setMessages((prev) => [...prev, { user: "You", message: input, isMe: true }]);
       setInput("");
+    } else if (!socket.connected) {
+      toast.error("Cannot send message - not connected to server");
     }
   };
 
   const endCall = () => {
     if (window.confirm("Are you sure you want to end the call for everyone?")) {
-      socket.emit("end-call", roomId);
+      if (socket.connected) {
+        socket.emit("end-call", roomId);
+      }
       cleanup();
       navigate("/Dashboard");
     }
@@ -407,6 +490,13 @@ export default function Room() {
     if (window.confirm("Leave the meeting?")) {
       cleanup();
       navigate("/Dashboard");
+    }
+  };
+
+  const reconnect = () => {
+    if (socket && !socket.connected) {
+      socket.connect();
+      setConnectionStatus("connecting");
     }
   };
 
@@ -420,7 +510,6 @@ export default function Room() {
     Object.values(peersRef.current).forEach((peer) => !peer.destroyed && peer.destroy());
     peersRef.current = {};
     setPeers([]);
-    socket.disconnect();
   };
 
   return (
@@ -440,6 +529,11 @@ export default function Room() {
           </div>
         </div>
         <div className="header-controls">
+          {connectionStatus === "disconnected" || connectionStatus === "error" ? (
+            <button onClick={reconnect} className="reconnect-btn">
+              <i className="fas fa-sync-alt"></i> Reconnect
+            </button>
+          ) : null}
           {isHost && (
             <button onClick={endCall} className="end-call-btn">
               <i className="fas fa-phone-slash"></i> End Call
@@ -501,8 +595,9 @@ export default function Room() {
             onKeyDown={(e) => e.key === "Enter" && sendMessage()}
             placeholder="Type a message..."
             className="chat-input"
+            disabled={!socket.connected}
           />
-          <button onClick={sendMessage} className="send-message-btn">
+          <button onClick={sendMessage} className="send-message-btn" disabled={!socket.connected}>
             <i className="fas fa-paper-plane"></i>
           </button>
         </div>

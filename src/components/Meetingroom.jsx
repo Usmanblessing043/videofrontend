@@ -112,7 +112,7 @@ export default function Room() {
     const getMedia = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { width: 1280, height: 720 }, 
+          video: { width: 640, height: 480 }, // Reduced resolution for better performance
           audio: true 
         });
         
@@ -127,6 +127,18 @@ export default function Room() {
         // Force play the video in case autoplay is blocked
         myVideo.current.play().catch(err => {
           console.warn("Autoplay prevented:", err);
+          // Try again with user gesture
+          const playButton = document.createElement('button');
+          playButton.innerHTML = 'Play Video';
+          playButton.style.position = 'absolute';
+          playButton.style.top = '10px';
+          playButton.style.left = '10px';
+          playButton.style.zIndex = '100';
+          playButton.onclick = () => {
+            myVideo.current.play();
+            playButton.remove();
+          };
+          document.querySelector('.local-video').appendChild(playButton);
         });
 
         setMediaError(false);
@@ -207,6 +219,12 @@ export default function Room() {
         peer.signal(signal);
       } else {
         console.warn("Peer not found for returned signal:", id);
+        // Try to create a new peer if not found
+        if (!isHost && streamRef.current) {
+          const newPeer = addPeer(signal, id, streamRef.current);
+          peersRef.current[id] = newPeer;
+          setPeers((prev) => [...prev, { peerId: id, peer: newPeer }]);
+        }
       }
     };
 
@@ -243,9 +261,10 @@ export default function Room() {
     socket.on("end-call", handleEndCall);
 
     // Join room when socket is connected and we have media
-    if (isConnected && !joinedRoom) {
+    if (isConnected && !joinedRoom && streamRef.current) {
       socket.emit("join-room", roomId);
       setJoinedRoom(true);
+      console.log("Joined room:", roomId);
     }
 
     return () => {
@@ -267,7 +286,7 @@ export default function Room() {
     
     const peer = new Peer({
       initiator: true,
-      trickle: true,
+      trickle: true, // Enable trickle ICE for faster connection
       stream,
       config: iceConfig,
     });
@@ -354,7 +373,7 @@ export default function Room() {
         } catch (e) {
           console.error("Retry failed:", e);
         }
-      }, 500);
+      }, 1000);
     }
 
     return peer;
@@ -606,25 +625,18 @@ function Video({ peer, peerId }) {
         ref.current.play().catch(err => {
           console.warn("Remote video autoplay prevented:", err);
         });
-        
-        // Check if video tracks are enabled
-        const videoTracks = stream.getVideoTracks();
-        if (videoTracks.length > 0) {
-          videoTracks[0].onended = () => {
-            setHasVideo(false);
-          };
-        }
       }
     };
     
     const handleConnect = () => {
       console.log("Peer connected:", peerId);
       setConnectionState("connected");
+      setIsLoading(false);
     };
     
     const handleError = (err) => {
       console.error("Peer error:", err);
-      setConnectionState("error");
+      setConnectionState("failed");
     };
     
     const handleClose = () => {
@@ -632,6 +644,11 @@ function Video({ peer, peerId }) {
       setConnectionState("disconnected");
     };
 
+    // Check if peer already has a stream
+    if (peer.stream) {
+      handleStream(peer.stream);
+    }
+    
     peer.on("stream", handleStream);
     peer.on("connect", handleConnect);
     peer.on("error", handleError);
@@ -646,6 +663,11 @@ function Video({ peer, peerId }) {
         if (state === "connected" && isLoading) {
           setIsLoading(false);
         }
+        
+        // If stuck for too long, try to reconnect
+        if (state === "connecting" && isLoading) {
+          console.log("Peer is still connecting:", peerId);
+        }
       }
     }, 1000);
     
@@ -657,6 +679,21 @@ function Video({ peer, peerId }) {
       clearInterval(interval);
     };
   }, [peer, peerId, isLoading]);
+
+  // Show different status based on connection state
+  const getStatusText = () => {
+    if (isLoading) {
+      switch (connectionState) {
+        case "connecting": return "Connecting...";
+        case "checking": return "Checking...";
+        case "connected": return "Loading...";
+        case "disconnected": return "Disconnected";
+        case "failed": return "Connection Failed";
+        default: return "Connecting...";
+      }
+    }
+    return "";
+  };
 
   return (
     <div className="video-item">
@@ -675,12 +712,12 @@ function Video({ peer, peerId }) {
       {isLoading && (
         <div className="video-loading">
           <i className="fas fa-spinner fa-spin"></i>
-          <span>{connectionState === "connecting" ? "Connecting..." : "Loading..."}</span>
+          <span>{getStatusText()}</span>
         </div>
       )}
       <div className="video-overlay">
         <span>User {peerId.substring(0, 8)}</span>
-        <div className={`connection-dot ${connectionState}`}></div>
+        <div className={`connection-dot ${connectionState}`} title={connectionState}></div>
         {!hasVideo && !isLoading && <div className="no-video-indicator">No video</div>}
       </div>
     </div>

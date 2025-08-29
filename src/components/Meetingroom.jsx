@@ -72,6 +72,7 @@ export default function Room() {
   const [isHost, setIsHost] = useState(false);
   const [participants, setParticipants] = useState(1);
   const [mediaError, setMediaError] = useState(false);
+  const [joinedRoom, setJoinedRoom] = useState(false);
 
   // Enhanced ICE configuration with more reliable servers
   const iceConfig = {
@@ -135,7 +136,7 @@ export default function Room() {
   }, []);
 
   useEffect(() => {
-    if (!socket) return;
+    if (!socket || !streamRef.current) return;
 
     const handleHost = () => {
       console.log("I am the host");
@@ -147,7 +148,7 @@ export default function Room() {
       setParticipants(users.length + 1);
       
       // Only create peers if we're the host to avoid duplicate connections
-      if (isHost && streamRef.current) {
+      if (isHost) {
         users.forEach((userId) => {
           if (!peersRef.current[userId] && userId !== socket.id) {
             console.log("Creating peer for user:", userId);
@@ -164,7 +165,7 @@ export default function Room() {
       setParticipants(prev => prev + 1);
       
       // Only create peer if we're the host to avoid duplicate connections
-      if (isHost && streamRef.current && !peersRef.current[newUserId] && newUserId !== socket.id) {
+      if (isHost && !peersRef.current[newUserId] && newUserId !== socket.id) {
         console.log("Creating peer for new user:", newUserId);
         const peer = createPeer(newUserId, socket.id, streamRef.current);
         peersRef.current[newUserId] = peer;
@@ -176,7 +177,7 @@ export default function Room() {
       console.log("📡 Receiving signal from:", callerId);
       
       // Only respond to signals if we're not the host (to avoid duplicate connections)
-      if (!isHost && streamRef.current && !peersRef.current[callerId] && callerId !== socket.id) {
+      if (!isHost && !peersRef.current[callerId] && callerId !== socket.id) {
         console.log("Adding peer for caller:", callerId);
         const peer = addPeer(signal, callerId, streamRef.current);
         peersRef.current[callerId] = peer;
@@ -230,8 +231,9 @@ export default function Room() {
     socket.on("end-call", handleEndCall);
 
     // Join room when socket is connected and we have media
-    if (isConnected && streamRef.current) {
+    if (isConnected && !joinedRoom) {
       socket.emit("join-room", roomId);
+      setJoinedRoom(true);
     }
 
     return () => {
@@ -245,7 +247,7 @@ export default function Room() {
       socket.off("chat-message", handleChatMessage);
       socket.off("end-call", handleEndCall);
     };
-  }, [socket, isConnected, roomId, isHost, navigate]);
+  }, [socket, isConnected, roomId, isHost, navigate, joinedRoom]);
 
   // Caller (initiator) - Only hosts should call this
   const createPeer = (userToSignal, callerId, stream) => {
@@ -304,7 +306,7 @@ export default function Room() {
     peer.on("signal", (signal) => {
       console.log("Callee returning signal to:", callerId);
       if (socket && socket.connected) {
-        socket.emit("returning-signal", { callerId, signal });
+        socket.emit("returning-signal", { signal, id: socket.id });
       } else {
         console.error("Cannot return signal - socket not connected");
       }

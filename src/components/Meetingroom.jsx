@@ -60,7 +60,8 @@ export default function Room() {
   const streamRef = useRef(null);
   const canvasRef = useRef();
   const frameInterval = useRef();
-  const screenStreamRef = useRef(null); // Fixed: Added screenStreamRef definition
+  const screenStreamRef = useRef(null);
+  const originalVideoTrackRef = useRef(null);
 
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOff, setIsCameraOff] = useState(false);
@@ -87,7 +88,7 @@ export default function Room() {
     const getMedia = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { width: 320, height: 240 }, // Lower resolution for better performance
+          video: { width: 320, height: 240 },
           audio: true 
         });
         
@@ -98,6 +99,8 @@ export default function Room() {
 
         myVideo.current.srcObject = stream;
         streamRef.current = stream;
+        // Store the original video track
+        originalVideoTrackRef.current = stream.getVideoTracks()[0];
 
         // Force play the video
         myVideo.current.play().catch(err => {
@@ -125,6 +128,9 @@ export default function Room() {
       if (frameInterval.current) {
         clearInterval(frameInterval.current);
       }
+      if (screenStreamRef.current) {
+        screenStreamRef.current.getTracks().forEach(track => track.stop());
+      }
     };
   }, []);
 
@@ -141,7 +147,6 @@ export default function Room() {
       setParticipants(prev => prev + 1);
       toast.info(`${data.username || 'User'} joined the meeting`);
       
-      // Create a container for the new user's video
       setRemoteVideos(prev => ({
         ...prev,
         [data.userId]: { username: data.username || 'User' }
@@ -152,7 +157,6 @@ export default function Room() {
       console.log("User left:", userId);
       setParticipants(prev => prev - 1);
       
-      // Remove the user's video
       setRemoteVideos(prev => {
         const newVideos = { ...prev };
         delete newVideos[userId];
@@ -163,7 +167,6 @@ export default function Room() {
     };
 
     const handleVideoFrame = (data) => {
-      // Update the remote video with the received frame
       setRemoteVideos(prev => {
         if (!prev[data.userId]) {
           return {
@@ -237,17 +240,12 @@ export default function Room() {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     
-    // Capture and send frames at a reasonable interval
     frameInterval.current = setInterval(() => {
       if (streamRef.current && !isCameraOff && socket && socket.connected) {
         try {
-          // Draw current video frame to canvas
           ctx.drawImage(myVideo.current, 0, 0, canvas.width, canvas.height);
-          
-          // Convert to data URL (JPEG with lower quality for smaller size)
           const frameData = canvas.toDataURL('image/jpeg', 0.4);
           
-          // Send frame to server
           socket.emit("video-frame", {
             roomId,
             frame: frameData,
@@ -257,7 +255,7 @@ export default function Room() {
           console.error("Error capturing frame:", err);
         }
       }
-    }, 200); // 5 FPS - adjust based on performance needs
+    }, 200);
   };
 
   const toggleMute = () => {
@@ -280,17 +278,32 @@ export default function Room() {
     }
   };
 
-  // Fixed: Properly defined toggleScreenShare function
   const toggleScreenShare = async () => {
     try {
       if (isScreenSharing) {
         // Switch back to camera
-        if (streamRef.current) {
-          const videoTrack = streamRef.current.getVideoTracks()[0];
-          if (videoTrack) {
-            videoTrack.enabled = true;
+        if (originalVideoTrackRef.current) {
+          // Re-enable the original video track
+          originalVideoTrackRef.current.enabled = true;
+          
+          // Update the stream with the original track
+          if (streamRef.current) {
+            // Remove any screen track
+            const screenTracks = streamRef.current.getVideoTracks().filter(
+              track => track !== originalVideoTrackRef.current
+            );
+            screenTracks.forEach(track => {
+              streamRef.current.removeTrack(track);
+              track.stop();
+            });
+            
+            // Add the original track back if it's not already there
+            if (!streamRef.current.getVideoTracks().includes(originalVideoTrackRef.current)) {
+              streamRef.current.addTrack(originalVideoTrackRef.current);
+            }
           }
         }
+        
         setIsScreenSharing(false);
         
         // Stop screen stream
@@ -306,19 +319,23 @@ export default function Room() {
         
         screenStreamRef.current = screenStream;
         
-        // Replace the video track in our stream
+        // Store the original track and disable it
         if (streamRef.current) {
-          const videoTrack = streamRef.current.getVideoTracks()[0];
-          if (videoTrack) {
-            videoTrack.stop();
-            streamRef.current.addTrack(screenStream.getVideoTracks()[0]);
+          const originalVideoTrack = streamRef.current.getVideoTracks()[0];
+          if (originalVideoTrack) {
+            originalVideoTrackRef.current = originalVideoTrack;
+            originalVideoTrack.enabled = false;
           }
+          
+          // Add the screen track to the stream
+          const screenTrack = screenStream.getVideoTracks()[0];
+          streamRef.current.addTrack(screenTrack);
         }
         
         setIsScreenSharing(true);
 
+        // Handle when screen share ends
         screenStream.getVideoTracks()[0].onended = () => {
-          // Switch back to camera when screen share ends
           toggleScreenShare();
         };
       }

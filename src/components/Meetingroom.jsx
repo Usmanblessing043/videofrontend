@@ -8,11 +8,12 @@ import './RoomMeeting.css';
 
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { toast } from "sonner";
+// import { toast } from "sonner";
+import { toast } from "../hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { VideoControls } from "@/components/ui/video-controls";
 import { VideoParticipant } from "@/components/ui/video-participant";
-import { useSocket } from "@/hooks/useSocket";
+import { useSocket } from "../hooks/useSocket";
 import { Clock } from "lucide-react";
 
 const backendUrl = process.env.REACT_APP_VIDEOBACKEND_URL || "http://localhost:3022";

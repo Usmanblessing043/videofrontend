@@ -1,10 +1,21 @@
 /* RoomMeeting.css */
-.room-container {
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+  
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #1a1a1a;
+    color: white;
+  }
+  
+  .room-container {
     display: flex;
     flex-direction: column;
     height: 100vh;
     background: #1a1a1a;
-    color: white;
   }
   
   .room-header {
@@ -29,6 +40,12 @@
     color: #ccc;
   }
   
+  .connection-info {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  
   .connection-status {
     font-size: 0.8rem;
     padding: 3px 8px;
@@ -41,14 +58,17 @@
     color: white;
   }
   
-  .connection-status.connecting {
-    background: #ff9800;
+  .connection-status.disconnected {
+    background: #f44336;
     color: white;
   }
   
-  .connection-status.error, .connection-status.disconnected {
-    background: #f44336;
+  .host-indicator {
+    background: #4caf50;
     color: white;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 0.8rem;
   }
   
   .header-controls {
@@ -56,7 +76,7 @@
     gap: 10px;
   }
   
-  .end-call-btn, .leave-call-btn {
+  .end-call-btn, .leave-call-btn, .reconnect-btn {
     padding: 8px 15px;
     border: none;
     border-radius: 4px;
@@ -75,6 +95,15 @@
   .leave-call-btn {
     background: #555;
     color: white;
+  }
+  
+  .reconnect-btn {
+    background: #ff9800;
+    color: white;
+  }
+  
+  .reconnect-btn:hover {
+    background: #f57c00;
   }
   
   .video-container {
@@ -106,6 +135,7 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+    background: #000;
   }
   
   .video-overlay {
@@ -116,10 +146,36 @@
     background: rgba(0, 0, 0, 0.6);
     padding: 8px;
     font-size: 0.8rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
   }
   
-  .local-video {
-    border: 2px solid #4caf50;
+  .host-badge {
+    background: #4caf50;
+    color: white;
+    padding: 2px 6px;
+    border-radius: 8px;
+    font-size: 0.7rem;
+  }
+  
+  .video-loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+  }
+  
+  .no-video-indicator {
+    background: rgba(0, 0, 0, 0.7);
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 0.7rem;
   }
   
   .controls {
@@ -153,12 +209,12 @@
   }
   
   .chat-container {
-    width: 300px;
+    width: 100%;
     background: #2d2d2d;
-    border-left: 1px solid #444;
+    border-top: 1px solid #444;
     display: flex;
     flex-direction: column;
-    height: 100%;
+    height: 300px;
   }
   
   .chat-header {
@@ -228,6 +284,11 @@
     color: white;
   }
   
+  .chat-input:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  
   .send-message-btn {
     padding: 10px 15px;
     border: none;
@@ -235,6 +296,51 @@
     background: #4caf50;
     color: white;
     cursor: pointer;
+  }
+  
+  .send-message-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  
+  .error-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    background: #1a1a1a;
+  }
+  
+  .error-content {
+    text-align: center;
+    background: #2d2d2d;
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  }
+  
+  .error-content h2 {
+    margin-bottom: 15px;
+    color: #f44336;
+  }
+  
+  .error-content p {
+    margin-bottom: 20px;
+    color: #ccc;
+  }
+  
+  .retry-btn {
+    padding: 10px 20px;
+    background: #4caf50;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1rem;
+  }
+  
+  .retry-btn:hover {
+    background: #3e8e41;
   }
   
   @media (min-width: 768px) {
@@ -248,23 +354,13 @@
     
     .chat-container {
       width: 350px;
+      height: auto;
+      border-top: none;
+      border-left: 1px solid #444;
     }
   }
   
   @media (max-width: 767px) {
-    .room-container {
-      flex-direction: column;
-    }
-    
-    .chat-container {
-      width: 100%;
-      height: 300px;
-    }
-    
-    .video-grid {
-      grid-template-columns: 1fr;
-    }
-    
     .room-header {
       flex-direction: column;
       gap: 10px;
@@ -274,5 +370,9 @@
     .header-controls {
       width: 100%;
       justify-content: center;
+    }
+    
+    .video-grid {
+      grid-template-columns: 1fr;
     }
   }

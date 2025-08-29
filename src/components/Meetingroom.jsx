@@ -80,6 +80,8 @@ export default function Room() {
       { urls: "stun:stun.l.google.com:19302" },
       { urls: "stun:stun1.l.google.com:19302" },
       { urls: "stun:stun2.l.google.com:19302" },
+      { urls: "stun:stun3.l.google.com:19302" },
+      { urls: "stun:stun4.l.google.com:19302" },
       {
         urls: "turn:relay1.expressturn.com:3478",
         username: "efG3knQJwOqN1HpXj1",
@@ -89,6 +91,16 @@ export default function Room() {
         urls: "turn:numb.viagenie.ca",
         username: "webrtc@live.com",
         credential: "password"
+      },
+      {
+        urls: "turn:openrelay.metered.ca:80",
+        username: "openrelayproject",
+        credential: "openrelayproject"
+      },
+      {
+        urls: "turn:openrelay.metered.ca:443",
+        username: "openrelayproject",
+        credential: "openrelayproject"
       }
     ],
     iceCandidatePoolSize: 10
@@ -580,6 +592,7 @@ function Video({ peer, peerId }) {
   const ref = useRef();
   const [hasVideo, setHasVideo] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [connectionState, setConnectionState] = useState("connecting");
 
   useEffect(() => {
     const handleStream = (stream) => {
@@ -587,6 +600,7 @@ function Video({ peer, peerId }) {
         ref.current.srcObject = stream;
         setHasVideo(stream.getVideoTracks().length > 0);
         setIsLoading(false);
+        setConnectionState("connected");
         
         // Force play the video
         ref.current.play().catch(err => {
@@ -603,12 +617,46 @@ function Video({ peer, peerId }) {
       }
     };
     
+    const handleConnect = () => {
+      console.log("Peer connected:", peerId);
+      setConnectionState("connected");
+    };
+    
+    const handleError = (err) => {
+      console.error("Peer error:", err);
+      setConnectionState("error");
+    };
+    
+    const handleClose = () => {
+      console.log("Peer connection closed:", peerId);
+      setConnectionState("disconnected");
+    };
+
     peer.on("stream", handleStream);
+    peer.on("connect", handleConnect);
+    peer.on("error", handleError);
+    peer.on("close", handleClose);
+    
+    // Check connection state periodically
+    const interval = setInterval(() => {
+      if (peer._pc) {
+        const state = peer._pc.connectionState;
+        setConnectionState(state);
+        
+        if (state === "connected" && isLoading) {
+          setIsLoading(false);
+        }
+      }
+    }, 1000);
     
     return () => {
       peer.removeListener("stream", handleStream);
+      peer.removeListener("connect", handleConnect);
+      peer.removeListener("error", handleError);
+      peer.removeListener("close", handleClose);
+      clearInterval(interval);
     };
-  }, [peer]);
+  }, [peer, peerId, isLoading]);
 
   return (
     <div className="video-item">
@@ -627,11 +675,12 @@ function Video({ peer, peerId }) {
       {isLoading && (
         <div className="video-loading">
           <i className="fas fa-spinner fa-spin"></i>
-          <span>Connecting...</span>
+          <span>{connectionState === "connecting" ? "Connecting..." : "Loading..."}</span>
         </div>
       )}
       <div className="video-overlay">
         <span>User {peerId.substring(0, 8)}</span>
+        <div className={`connection-dot ${connectionState}`}></div>
         {!hasVideo && !isLoading && <div className="no-video-indicator">No video</div>}
       </div>
     </div>

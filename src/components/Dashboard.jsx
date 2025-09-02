@@ -3,7 +3,7 @@ import './Dashboard.css'
 import { useState, useEffect } from 'react'
 import axios from 'axios'
 import { useNavigate } from 'react-router-dom'
-const backendUrl = process.env.REACT_APP_VIDEOBACKEND_URL || "http://localhost:3022";
+const backendUrl = process.env.REACT_APP_VIDEOBACKEND_URL
 
 
 const Dashboard = () => {

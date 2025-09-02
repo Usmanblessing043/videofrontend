@@ -42,10 +42,11 @@ const Meetingroom = () => {
     }
 
     // Fetch user data
-    axios
-      .get(`${backendUrl}/Verify`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
+    axios.get(`${backendUrl}/Verify`, {
+      headers: {
+        "Authorization": `bearer ${token}`
+      }
+    })
       .then((res) => setUserData(res.data.user))
       .catch((err) => {
         console.error(err.response?.data || err);

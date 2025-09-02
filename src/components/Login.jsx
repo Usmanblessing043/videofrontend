@@ -33,7 +33,7 @@ const Login = () => {
                 axios.post(`${backendUrl}/login`, value)
                     .then((res) => {
                         console.log(res);
-                        localStorage.setItem("tokens", res.data.token)
+                        localStorage.setItem("token", res.data.token)
                         toast.success('Login successfull')
                         navigate('/Dashboard')
                         resetForm()

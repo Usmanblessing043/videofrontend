@@ -8,7 +8,7 @@ const backendUrl = process.env.REACT_APP_VIDEOBACKEND_URL || "http://localhost:3
 
 const Dashboard = () => {
   const navigate = useNavigate()
-  const token = localStorage.getItem('tokens')
+  const token = localStorage.getItem('token')
   const users = JSON.parse(localStorage.getItem('current_users'))
   const name = users.username.toUpperCase()
 

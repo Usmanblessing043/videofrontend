@@ -36,17 +36,15 @@ const Meetingroom = () => {
 
 
   useEffect(() => {
-    if (token) {
+    if (!token) {
       navigate(`/Meetingroom/${roomId}`);
       return;
     }
 
     // Fetch user data
     axios.get(`${backendUrl}/Verify`, {
-      headers: {
-        "Authorization": `bearer ${token}`
-      }
-    })
+        headers: { Authorization: `Bearer ${token}` },
+      })
       .then((res) => setUserData(res.data.user))
       .catch((err) => {
         console.error(err.response?.data || err);

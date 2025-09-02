@@ -146,7 +146,7 @@ const Meetingroom = () => {
 
 
 
-  async function ensureLocalStream() {3
+  async function ensureLocalStream() {
     if (localStreamRef.current) return localStreamRef.current;
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: true,

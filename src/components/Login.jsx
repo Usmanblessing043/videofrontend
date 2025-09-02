@@ -30,7 +30,7 @@ const Login = () => {
         onSubmit: (value, {resetForm}) => {
             setloading(true)
             console.log(value);
-                axios.post(`${backendUrl}/user/login`, value)
+                axios.post(`${backendUrl}/login`, value)
                     .then((res) => {
                         console.log(res);
                         localStorage.setItem("tokens", res.data.token)

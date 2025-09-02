@@ -3,7 +3,7 @@ import './Dashboard.css'
 import { useState, useEffect } from 'react'
 import axios from 'axios'
 import { useNavigate } from 'react-router-dom'
-const backendUrl = process.env.REACT_APP_VIDEOBACKEND_URL;
+const backendUrl = process.env.REACT_APP_VIDEOBACKEND_URL || "http://localhost:3022";
 
 
 const Dashboard = () => {
@@ -13,7 +13,7 @@ const Dashboard = () => {
   const name = users.username.toUpperCase()
 
   useEffect(() => {
-    axios.get(`${backendUrl}/user/Verify`, {
+    axios.get(`${backendUrl}/Verify`, {
       headers: {
         "Authorization": `bearer ${token}`
       }
@@ -31,7 +31,7 @@ const Dashboard = () => {
   }, [])
 
   const createRoom = async () => {
-    const res = await axios.post(`${backendUrl}/user/createroom`);
+    const res = await axios.post(`${backendUrl}/createroom`);
     navigate(`/meetingroom/${res.data.roomId}`);
   };
 

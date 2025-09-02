@@ -32,10 +32,10 @@ const Signup = () => {
         onSubmit: (value, {resetForm}) => {
             setloading(true)
             console.log(value);
-                axios.post(`${backendUrl}/user/signup`, value)
+                axios.post(`${backendUrl}/signup`, value)
                     .then((res) => {
                         console.log(res);
-                        toast.success('Login successfull')
+                        toast.success('Sign up successfull')
                         navigate("/Login")
                         resetForm()
                         setloading(false)
